@@ -39,7 +39,7 @@ func TestHealthCheck(t *testing.T) {
 			subscribers: []chan bool{conn.messages},
 			backend:     availableServer.URL,
 		}
-		hc.current_health = true
+		hc.current_health = false
 
 		go hc.Start()
 		<-resChan

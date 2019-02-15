@@ -20,7 +20,6 @@ func newConnection(backend string, client *http.Client) *connection {
 		backend:  backend,
 		client:   client,
 		messages: make(chan bool),
-		healthy:  true,
 	}
 
 	go conn.healthCheck()
