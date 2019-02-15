@@ -15,7 +15,7 @@ type pool struct {
 //ex: ['http://localhost:9000','http://localhost:9000']
 func New(backends []string, maxRequests int) *pool {
 	tr := &http.Transport{
-		MaxIdleConns:    100,
+		MaxIdleConns:    maxRequests,
 		IdleConnTimeout: 5 * time.Second,
 	}
 
@@ -25,12 +25,19 @@ func New(backends []string, maxRequests int) *pool {
 		connections: make(chan *connection, len(backends)),
 	}
 
+	var connsPerBackend int
+	backendCount := len(backends)
+
+	if backendCount > 0 {
+		connsPerBackend = maxRequests / len(backends)
+	}
+
 	for _, back := range backends {
 		newConnection := newConnection(back, client)
-		connectionPool.connections <- newConnection
+		connections := make([]chan bool, connsPerBackend)
 
-		connections := make([]chan bool, maxRequests)
-		for i := 0; i < maxRequests; i++ {
+		for i := 0; i < connsPerBackend; i++ {
+			connectionPool.connections <- newConnection
 			connections[i] = newConnection.messages
 		}
 

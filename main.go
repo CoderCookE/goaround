@@ -11,8 +11,9 @@ import (
 )
 
 func main() {
-	portString, backends := parseFlags()
-	connectionPool := connectionpool.New(backends, 5)
+	portString, backends, numConns := parseFlags()
+
+	connectionPool := connectionpool.New(backends, *numConns)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		connectionPool.Fetch(r.URL.Path, w)
@@ -29,8 +30,10 @@ func main() {
 	server.ListenAndServe()
 }
 
-func parseFlags() (portString string, backends customflags.Backend) {
+func parseFlags() (portString string, backends customflags.Backend, numConns *int) {
 	port := flag.Int("p", 3000, "Load Balancer Listen Port (default: 3000)")
+	numConns = flag.Int("n", 3, "Max number of requests")
+
 	backends = make(customflags.Backend, 0)
 	flag.Var(&backends, "b", "Backend location ex: http://localhost:9000))")
 	flag.Parse()

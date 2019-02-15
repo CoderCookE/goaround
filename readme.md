@@ -31,6 +31,7 @@ Please ensure the `sha` matches prior to running or follow the directions above 
 ```
 -p port: defaults to 3000
 -b backend-address: may be passed multiple times
+-n max number of connections per backend
 ```
 
 ## Detailed Implemnation
