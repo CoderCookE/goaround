@@ -22,14 +22,14 @@ func New(backends []string, maxRequests int) *pool {
 	client := &http.Client{Transport: tr}
 
 	connectionPool := &pool{
-		connections: make(chan *connection, len(backends)),
+		connections: make(chan *connection, maxRequests),
 	}
 
 	var connsPerBackend int
 	backendCount := len(backends)
 
 	if backendCount > 0 {
-		connsPerBackend = maxRequests / len(backends)
+		connsPerBackend = maxRequests / backendCount
 	}
 
 	for _, back := range backends {

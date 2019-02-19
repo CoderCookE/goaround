@@ -13,6 +13,8 @@ import (
 func main() {
 	portString, backends, numConns := parseFlags()
 
+	fmt.Printf("Starting with conf, %s %s %s", portString, backends, *numConns)
+
 	connectionPool := connectionpool.New(backends, *numConns)
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
