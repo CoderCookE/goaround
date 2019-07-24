@@ -19,7 +19,7 @@ make tests
 ## Running
 The provided binary includes a `shasum` file located at `./bin/shasum` to check this value on macOS you can run:
 ```
-shashum -a 1 ./bin/goaround
+shasum -a 1 ./bin/goaround
 ```
 Please ensure the `sha` matches prior to running or follow the directions above to build it yourself.
 
@@ -32,6 +32,8 @@ Please ensure the `sha` matches prior to running or follow the directions above 
 -p port: defaults to 3000
 -b backend-address: may be passed multiple times
 -n max number of connections per backend
+-cacert location of certficate authority cert
+-privkey location of private key
 ```
 
 ## Detailed Implemnation
