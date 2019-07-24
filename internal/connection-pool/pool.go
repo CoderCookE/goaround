@@ -42,9 +42,10 @@ func New(backends []string, maxRequests int) *pool {
 		}
 
 		hc := healthChecker{
-			client:      client,
-			subscribers: connections,
-			backend:     newConnection.backend,
+			client:         client,
+			subscribers:    connections,
+			backend:        newConnection.backend,
+			current_health: true,
 		}
 
 		go hc.Start()

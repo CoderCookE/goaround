@@ -47,7 +47,7 @@ func (hc *healthChecker) healthCheck() {
 			healthCheck := &healthCheckReponse{}
 			json.Unmarshal(body, healthCheck)
 
-			healthy = healthCheck.State == "healthy"
+			healthy = healthCheck.State == "healthy" || resp.StatusCode == 200
 		}
 	}
 
