@@ -40,16 +40,16 @@ Please ensure the `sha` matches prior to running or follow the directions above 
 This service starts a web server on a user defined port, passed via `-p` flag,
 if no flag is passed the service will default to port 3000.
 
+If you pass both a `cacert` and `privkey`, the server will terminate ssl connections.
+
 Backend services are passed via `-b` flags, each backend passed will created a [connection](internal/connection-pool/connection),
 which are managed by a [pool](internal/connection-pool/connection).  The `connections` are pushed into a buffered channel
 where they are retrieved when the `Fetch` method is called on the `pool`.  The `Fetch` method will recursively pull connections
-from the channel until a request is completed successfully, or we run out of available connections.  If the backend request is successful
-we copy the contents of the reponse back through to the original user request, if we are unsuccesful we return a 503 status code.  
-Unsuccesful requests will cause the `connection` to be marked as degraded and pushed into a seperate channel of known degraded connections,
-this channel is checked every second and healthy connections are returned to the connection pool.
+from the channel until a request is completed successfully, or we run out of available connections.
 
-The `pool` service also upon creation starts a go return that makes use of a ticker to periodically pull connections off 
-our `connections channel`  and performs a `healthCheck()`, which updates the state of the connection to either "degraded" or "healthy".
+Connections subscribe to a health check channel, which is pushed to if their is a change in health status for the backend. Backend
+services are assumed to have a `/health` endpoint, which will return a 200 response code.   Other response codes you wish be considered
+healthy must return the body in the form `{"state": "healthy", "message": ""}`
 
 ## Repo contents
 ```
