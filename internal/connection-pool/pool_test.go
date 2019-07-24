@@ -13,7 +13,7 @@ import (
 func TestFetch(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
-	t.Run("No backends avaible, returns 503", func(t *testing.T) {
+	t.Run("No backends available, returns 503", func(t *testing.T) {
 		connectionPool := New([]string{}, 1)
 		recorder := httptest.NewRecorder()
 		connectionPool.Fetch("", recorder)

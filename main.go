@@ -45,7 +45,7 @@ func main() {
 
 func parseFlags() (portString string, backends customflags.Backend, numConns *int, cacert *string, privkey *string) {
 	port := flag.Int("p", 3000, "Load Balancer Listen Port (default: 3000)")
-	numConns = flag.Int("n", 3, "Max number of requests")
+	numConns = flag.Int("n", 3, "Max number of connections per backend")
 
 	backends = make(customflags.Backend, 0)
 	flag.Var(&backends, "b", "Backend location ex: http://localhost:9000))")
