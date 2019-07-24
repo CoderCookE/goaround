@@ -12,7 +12,7 @@ type connection struct {
 	healthy  bool
 	client   *http.Client
 	messages chan bool
-	lock     sync.Mutex
+	lock     sync.RWMutex
 }
 
 func newConnection(backend string, client *http.Client) *connection {
@@ -31,9 +31,9 @@ func newConnection(backend string, client *http.Client) *connection {
 func (c *connection) get(route string) (*http.Response, error) {
 	url := fmt.Sprintf("%s%s", c.backend, route)
 
-	c.lock.Lock()
+	c.lock.RLock()
 	health := c.healthy
-	c.lock.Unlock()
+	c.lock.RUnlock()
 
 	if health {
 		return c.client.Get(url)

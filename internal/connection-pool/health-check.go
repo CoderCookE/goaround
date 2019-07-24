@@ -29,7 +29,7 @@ func (hc *healthChecker) Start() {
 }
 
 func (hc *healthChecker) healthCheck() {
-	url := fmt.Sprintf("%s%s", hc.backend, "/_health")
+	url := fmt.Sprintf("%s%s", hc.backend, "/health")
 
 	healthy := hc.current_health
 
