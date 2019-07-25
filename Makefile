@@ -9,6 +9,7 @@ default: bin
 bin:
 	mkdir -p bin
 	go build -o ./bin/$(APP_NAME)
+	shasum -a 1 ./bin/goaround > ./bin/shasum
 
 test:
 	go test -race -v ./...
