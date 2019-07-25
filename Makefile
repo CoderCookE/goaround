@@ -11,6 +11,6 @@ bin:
 	go build -o ./bin/$(APP_NAME)
 
 test:
-	go test ./...
+	go test -race -v ./...
 
 .PHONY: bin default
