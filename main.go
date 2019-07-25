@@ -13,9 +13,10 @@ import (
 func main() {
 	portString, backends, numConns, cacert, privkey := parseFlags()
 
-	fmt.Printf("Starting with conf, %s %s %s", portString, backends, *numConns)
+	fmt.Printf("Starting with conf, %s %s %d", portString, backends, *numConns)
 
 	connectionPool := connectionpool.New(backends, *numConns)
+	defer connectionPool.Shutdown()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		connectionPool.Fetch(r.URL.Path, w)

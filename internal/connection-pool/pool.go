@@ -8,7 +8,8 @@ import (
 )
 
 type pool struct {
-	connections chan *connection
+	connections  chan *connection
+	healthChecks []*healthChecker
 }
 
 //Exported method for creation of a connection-pool takes []string
@@ -41,12 +42,14 @@ func New(backends []string, maxRequests int) *pool {
 			connections[i] = newConnection.messages
 		}
 
-		hc := healthChecker{
+		hc := &healthChecker{
 			client:      client,
 			subscribers: connections,
 			backend:     newConnection.backend,
+			done:        make(chan bool, 1),
 		}
 
+		connectionPool.healthChecks = append(connectionPool.healthChecks, hc)
 		go hc.Start()
 	}
 
@@ -59,6 +62,11 @@ func (p *pool) Fetch(path string, w http.ResponseWriter) {
 	select {
 	case connection := <-p.connections:
 		resp, err := connection.get(path)
+
+		defer func() {
+			p.connections <- connection
+		}()
+
 		if err != nil {
 			log.Printf("retrying err with request %s", err.Error())
 			p.Fetch(path, w)
@@ -71,9 +79,13 @@ func (p *pool) Fetch(path string, w http.ResponseWriter) {
 			defer resp.Body.Close()
 			io.Copy(w, resp.Body)
 		}
-
-		p.connections <- connection
 	default:
 		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+}
+
+func (p *pool) Shutdown() {
+	for _, hc := range p.healthChecks {
+		hc.Shutdown()
 	}
 }
