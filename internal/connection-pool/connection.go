@@ -12,14 +12,14 @@ type connection struct {
 	healthy  bool
 	client   *http.Client
 	messages chan bool
-	lock     sync.RWMutex
+	sync.RWMutex
 }
 
 func newConnection(backend string, client *http.Client) *connection {
 	conn := &connection{
 		backend:  backend,
 		client:   client,
-		messages: make(chan bool),
+		messages: make(chan bool, 1),
 	}
 
 	go conn.healthCheck()
@@ -30,9 +30,9 @@ func newConnection(backend string, client *http.Client) *connection {
 func (c *connection) get(route string) (*http.Response, error) {
 	url := fmt.Sprintf("%s%s", c.backend, route)
 
-	c.lock.RLock()
+	c.RLock()
 	health := c.healthy
-	c.lock.RUnlock()
+	c.RUnlock()
 
 	if health {
 		return c.client.Get(url)
@@ -44,8 +44,8 @@ func (c *connection) get(route string) (*http.Response, error) {
 func (c *connection) healthCheck() {
 	for {
 		healthy := <-c.messages
-		c.lock.Lock()
+		c.Lock()
 		c.healthy = healthy
-		c.lock.Unlock()
+		c.Unlock()
 	}
 }
