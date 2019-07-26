@@ -53,18 +53,3 @@ Connections subscribe to a health check channel, which is pushed to if their is 
 services are assumed to have a `/health` endpoint, which will return a 200 response code.   Other response codes you wish be considered
 healthy must return the body in the form `{"state": "healthy", "message": ""}`
 
-## Repo contents
-```
-|_main.go  
-|_main_test.go
-|_internal
-||_assert
-|||_assert.go 
-||_custom-flags
-|||_backend.go 
-||_connection-pool
-|||_connection.go
-|||_connection_test.go
-|||_pool.go
-|||_pool_test.go
-```
