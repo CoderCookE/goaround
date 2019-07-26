@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/CoderCookE/goaround.svg?branch=master)](https://travis-ci.org/CoderCookE/goaround)
+
 # GoAround
 A simple HTTP load balancer that
 is capable of managing multiple server instances in a pool and balancing the
