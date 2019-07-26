@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/codercooke/goaround/internal/connection-pool"
-	"github.com/codercooke/goaround/internal/custom-flags"
+	"github.com/CoderCookE/goaround/internal/connectionpool"
+	"github.com/CoderCookE/goaround/internal/customflags"
 )
 
 func main() {
