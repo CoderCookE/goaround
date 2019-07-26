@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/codercooke/goaround/internal/assert"
+	"github.com/CoderCookE/goaround/internal/assert"
 	"testing"
 )
 

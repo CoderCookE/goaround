@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codercooke/goaround/internal/assert"
+	"github.com/CoderCookE/goaround/internal/assert"
 )
 
 func TestHealthChecker(t *testing.T) {
