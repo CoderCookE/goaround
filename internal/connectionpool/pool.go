@@ -3,6 +3,7 @@ package connectionpool
 import (
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"time"
 )
@@ -16,6 +17,10 @@ type pool struct {
 //ex: ['http://localhost:9000','http://localhost:9000']
 func New(backends []string, maxRequests int) *pool {
 	tr := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout: 3 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 4 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second,
 		MaxIdleConns:          maxRequests,
