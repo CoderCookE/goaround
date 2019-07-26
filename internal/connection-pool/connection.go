@@ -19,7 +19,7 @@ func newConnection(backend string, client *http.Client) *connection {
 	conn := &connection{
 		backend:  backend,
 		client:   client,
-		messages: make(chan bool, 1),
+		messages: make(chan bool),
 	}
 
 	go conn.healthCheck()

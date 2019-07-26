@@ -1,9 +1,7 @@
 package connectionpool
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -20,58 +18,24 @@ func TestHealthCheck(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
 	t.Run("backend returns a healthy state", func(t *testing.T) {
-		resChan := make(chan bool, 1)
-
-		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
-			healthMessage, _ := json.Marshal(healthReponse)
-			w.Write(healthMessage)
-			resChan <- true
-		})
-
-		availableServer := httptest.NewServer(availableHandler)
-		defer availableServer.Close()
-
-		conn := newConnection(availableServer.URL, client)
-
-		hc := healthChecker{
-			client:      client,
-			subscribers: []chan bool{conn.messages},
-			backend:     availableServer.URL,
-		}
-		hc.current_health = false
-
-		go hc.Start()
-		<-resChan
-		time.Sleep(5 * time.Millisecond)
-
-		assertion.True(conn.healthy)
-	})
-
-	t.Run("backend returns a degraded state", func(t *testing.T) {
-		resChan := make(chan bool, 1)
-		degradedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			healthReponse := &healthCheckReponse{State: "degraded", Message: ""}
-			healthMessage, _ := json.Marshal(healthReponse)
-			w.Write(healthMessage)
-			resChan <- true
-		})
-
-		degradedServer := httptest.NewServer(degradedHandler)
-		defer degradedServer.Close()
-
-		conn := newConnection(degradedServer.URL, client)
-		hc := healthChecker{
-			client:      client,
-			subscribers: []chan bool{conn.messages},
-			backend:     degradedServer.URL,
-		}
-		hc.current_health = true
-
-		go hc.Start()
-		<-resChan
-		time.Sleep(5 * time.Millisecond)
+		conn := newConnection("", client)
 
 		assertion.False(conn.healthy)
+		conn.messages <- true
+		time.Sleep(200 * time.Millisecond)
+
+		conn.Lock()
+		health := conn.healthy
+		conn.Unlock()
+		assertion.True(health)
+
+		conn.messages <- false
+		time.Sleep(200 * time.Millisecond)
+
+		conn.Lock()
+		health = conn.healthy
+		conn.Unlock()
+
+		assertion.False(health)
 	})
 }

@@ -6,12 +6,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/codercooke/goaround/internal/assert"
 )
 
 func TestFetch(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
+	tr := &http.Transport{
+		MaxIdleConns:    10,
+		IdleConnTimeout: 1 * time.Second,
+	}
+
+	client := &http.Client{Transport: tr}
 
 	t.Run("No backends available, returns 503", func(t *testing.T) {
 		connectionPool := New([]string{}, 1)
@@ -60,14 +67,30 @@ func TestFetch(t *testing.T) {
 		unavailableServer := httptest.NewServer(unavailableHandler)
 		defer unavailableServer.Close()
 
-		backends := []string{unavailableServer.URL, availableServer.URL}
-		connectionPool := New(backends, 10)
+		healthyConnection := &connection{
+			backend:  availableServer.URL,
+			healthy:  true,
+			client:   client,
+			messages: make(chan bool),
+		}
+
+		unhealthyConnection := &connection{
+			backend:  unavailableServer.URL,
+			healthy:  false,
+			client:   client,
+			messages: make(chan bool),
+		}
+
+		connectionPool := New([]string{}, 10)
+		connectionPool.connections <- unhealthyConnection
+		connectionPool.connections <- healthyConnection
+
 		defer connectionPool.Shutdown()
 
-		<-availableResChan
-
 		recorder := httptest.NewRecorder()
-		connectionPool.Fetch("", recorder)
+		connectionPool.Fetch("/hello", recorder)
+
+		<-availableResChan
 
 		result, err := ioutil.ReadAll(recorder.Result().Body)
 

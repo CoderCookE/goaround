@@ -15,11 +15,11 @@ type healthCheckReponse struct {
 }
 
 type healthChecker struct {
-	subscribers    []chan bool
-	current_health bool
-	client         *http.Client
-	backend        string
-	done           chan bool
+	subscribers   []chan bool
+	currentHealth bool
+	client        *http.Client
+	backend       string
+	done          chan bool
 }
 
 func (hc *healthChecker) Start() {
@@ -27,7 +27,7 @@ func (hc *healthChecker) Start() {
 	for {
 		select {
 		case <-ticker.C:
-			hc.healthCheck()
+			hc.check()
 		case <-hc.done:
 			ticker.Stop()
 			return
@@ -35,10 +35,10 @@ func (hc *healthChecker) Start() {
 	}
 }
 
-func (hc *healthChecker) healthCheck() {
+func (hc *healthChecker) check() {
 	url := fmt.Sprintf("%s%s", hc.backend, "/health")
 
-	healthy := hc.current_health
+	healthy := hc.currentHealth
 
 	if resp, err := hc.client.Get(url); err != nil {
 		log.Printf("Error with health check, backend: %s, error %s", hc.backend, err.Error())
@@ -60,8 +60,8 @@ func (hc *healthChecker) healthCheck() {
 		}
 	}
 
-	if healthy != hc.current_health {
-		hc.current_health = healthy
+	if healthy != hc.currentHealth {
+		hc.currentHealth = healthy
 		for _, c := range hc.subscribers {
 			c <- healthy
 		}
