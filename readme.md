@@ -15,7 +15,7 @@ make
 
 ### Testing
 ```
-make tests
+make test
 ```
 
 ## Running
