@@ -54,9 +54,7 @@ func (hc *healthChecker) check() {
 			healthCheck := &healthCheckReponse{}
 			json.Unmarshal(body, healthCheck)
 
-			log.Printf("healthy")
-
-			healthy = healthCheck.State == "healthy" || resp.StatusCode == 200
+			healthy = healthCheck.State == "healthy" || (resp.StatusCode == 200 && healthCheck.State != "degraded")
 		}
 	}
 
