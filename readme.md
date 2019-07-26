@@ -26,7 +26,7 @@ shasum -a 1 ./bin/goaround
 Please ensure the `sha` matches prior to running or follow the directions above to build it yourself.
 
 ```
-./bin/load-blancer -p 3000 -b http://localhost:9000 -b http//localhost:9001
+sudo ./bin/goaround -p 443 -b http://127.0.0.1:2702 -cacert /Users/ecook/cacert.pem -privkey /Users/ecook/privkey.pem
 ```
 
 ### Flags
