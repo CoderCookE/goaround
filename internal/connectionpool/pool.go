@@ -1,7 +1,6 @@
 package connectionpool
 
 import (
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -67,25 +66,17 @@ func New(backends []string, maxRequests int) *pool {
 
 //Exported method for passing a request to a connection from the pool
 //Returns a 503 status code if request is unsuccessful
-func (p *pool) Fetch(method, path string, w http.ResponseWriter) {
+func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	select {
 	case connection := <-p.connections:
-		resp, err := connection.get(method, path)
 		defer func() {
 			p.connections <- connection
 		}()
 
+		err := connection.get(w, r)
 		if err != nil {
 			log.Printf("retrying err with request: %s", err.Error())
-			p.Fetch(method, path, w)
-		} else if resp.StatusCode == http.StatusInternalServerError {
-			log.Println("retrying bad status code")
-			resp.Body.Close()
-			p.Fetch(method, path, w)
-		} else {
-			log.Println("success")
-			defer resp.Body.Close()
-			io.Copy(w, resp.Body)
+			p.Fetch(w, r)
 		}
 	default:
 		w.WriteHeader(http.StatusServiceUnavailable)

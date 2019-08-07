@@ -2,49 +2,50 @@ package connectionpool
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"sync"
 )
 
 type connection struct {
 	backend  string
 	healthy  bool
-	client   *http.Client
 	messages chan bool
 	sync.RWMutex
+	client *http.Client
+	proxy  *httputil.ReverseProxy
 }
 
 func newConnection(backend string, client *http.Client) *connection {
+	url, _ := url.Parse(backend)
+
 	conn := &connection{
 		backend:  backend,
 		client:   client,
 		messages: make(chan bool),
+		proxy:    httputil.NewSingleHostReverseProxy(url),
 	}
+
+	conn.proxy.Transport = client.Transport
 
 	go conn.healthCheck()
 
 	return conn
 }
 
-func (c *connection) get(method, route string) (*http.Response, error) {
-	url := fmt.Sprintf("%s%s", c.backend, route)
-
+func (c *connection) get(w http.ResponseWriter, r *http.Request) error {
 	c.RLock()
 	health := c.healthy
 	c.RUnlock()
 
 	err := errors.New("Unhealthy Node")
-
 	if health {
-		var request *http.Request
-		request, err = http.NewRequest(method, url, nil)
-		if err == nil {
-			return c.client.Do(request)
-		}
+		c.proxy.ServeHTTP(w, r)
+		return nil
 	}
 
-	return nil, err
+	return err
 }
 
 func (c *connection) healthCheck() {
