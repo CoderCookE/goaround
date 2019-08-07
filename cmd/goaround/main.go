@@ -19,7 +19,7 @@ func main() {
 	defer connectionPool.Shutdown()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		connectionPool.Fetch(r.URL.Path, w)
+		connectionPool.Fetch(r.Method, r.URL.Path, w)
 	})
 
 	server := &http.Server{

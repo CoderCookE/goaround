@@ -27,18 +27,24 @@ func newConnection(backend string, client *http.Client) *connection {
 	return conn
 }
 
-func (c *connection) get(route string) (*http.Response, error) {
+func (c *connection) get(method, route string) (*http.Response, error) {
 	url := fmt.Sprintf("%s%s", c.backend, route)
 
 	c.RLock()
 	health := c.healthy
 	c.RUnlock()
 
+	err := errors.New("Unhealthy Node")
+
 	if health {
-		return c.client.Get(url)
-	} else {
-		return nil, errors.New("Unhealthy Node")
+		var request *http.Request
+		request, err = http.NewRequest(method, url, nil)
+		if err == nil {
+			return c.client.Do(request)
+		}
 	}
+
+	return nil, err
 }
 
 func (c *connection) healthCheck() {
