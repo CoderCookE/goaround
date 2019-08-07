@@ -23,6 +23,8 @@ type healthChecker struct {
 }
 
 func (hc *healthChecker) Start() {
+	hc.check()
+
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	for {
 		select {

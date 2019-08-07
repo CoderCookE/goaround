@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -13,13 +14,15 @@ import (
 func main() {
 	portString, backends, numConns, cacert, privkey := parseFlags()
 
-	fmt.Printf("Starting with conf, %s %s %d", portString, backends, *numConns)
+	log.Printf("Starting with conf, %s %s %d", portString, backends, *numConns)
 
 	connectionPool := connectionpool.New(backends, *numConns)
 	defer connectionPool.Shutdown()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		connectionPool.Fetch(w, r)
+		log.Printf("Request completed in %n", time.Since(start).Seconds())
 	})
 
 	server := &http.Server{
@@ -32,7 +35,6 @@ func main() {
 	defer server.Close()
 
 	var err error
-
 	if *cacert != "" && *privkey != "" {
 		err = server.ListenAndServeTLS(*cacert, *privkey)
 	} else {
@@ -40,7 +42,7 @@ func main() {
 	}
 
 	if err != nil {
-		fmt.Sprintf("ListenAndServe: %s", err)
+		log.Printf("ListenAndServe: %s", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package connectionpool
 
 import (
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"time"
@@ -31,7 +32,7 @@ func New(backends []string, maxRequests int) *pool {
 		ResponseHeaderTimeout: 50 * time.Second,
 		MaxIdleConns:          maxRequests,
 		IdleConnTimeout:       30 * time.Second,
-		MaxIdleConnsPerHost:   connsPerBackend + 1,
+		MaxIdleConnsPerHost:   connsPerBackend,
 	}
 
 	client := &http.Client{Transport: tr}
@@ -40,28 +41,42 @@ func New(backends []string, maxRequests int) *pool {
 		connections: make(chan *connection, maxRequests),
 	}
 
+	poolConnections := make([]*connection, 0)
+
 	for _, back := range backends {
 		newConnection := newConnection(back, client)
-		connections := make([]chan bool, connsPerBackend)
+		backendConnections := make([]chan bool, connsPerBackend)
 
 		for i := 0; i < connsPerBackend; i++ {
-			connectionPool.connections <- newConnection
-			connections[i] = newConnection.messages
+			poolConnections = append(poolConnections, newConnection)
+			backendConnections[i] = newConnection.messages
 		}
 
 		hc := &healthChecker{
 			client:      client,
-			subscribers: connections,
+			subscribers: backendConnections,
 			backend:     newConnection.backend,
 			done:        make(chan bool, 1),
 		}
 
-		hc.check()
 		connectionPool.healthChecks = append(connectionPool.healthChecks, hc)
 		go hc.Start()
 	}
 
+	shuffle(poolConnections, connectionPool.connections)
+
 	return connectionPool
+}
+
+func shuffle(conns []*connection, ch chan *connection) {
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(conns), func(i, j int) {
+		conns[i], conns[j] = conns[j], conns[i]
+	})
+
+	for _, conn := range conns {
+		ch <- conn
+	}
 }
 
 //Exported method for passing a request to a connection from the pool
