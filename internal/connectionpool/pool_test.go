@@ -5,27 +5,25 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/CoderCookE/goaround/internal/assert"
 )
 
 func TestFetch(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
-	tr := &http.Transport{
-		MaxIdleConns:    10,
-		IdleConnTimeout: 1 * time.Second,
-	}
-
-	client := &http.Client{Transport: tr}
 
 	t.Run("No backends available, returns 503", func(t *testing.T) {
 		connectionPool := New([]string{}, 1)
 		defer connectionPool.Shutdown()
 
+		reader := strings.NewReader("This is a test")
+		request := httptest.NewRequest("GET", "http://www.test.com/hello", reader)
 		recorder := httptest.NewRecorder()
-		connectionPool.Fetch("", recorder)
+		connectionPool.Fetch(recorder, request)
 
 		assertion.Equal(recorder.Code, http.StatusServiceUnavailable)
 	})
@@ -42,8 +40,10 @@ func TestFetch(t *testing.T) {
 		connectionPool := New(backends, 1)
 		defer connectionPool.Shutdown()
 
+		reader := strings.NewReader("This is a test")
+		request := httptest.NewRequest("GET", "http://www.test.com/hello", reader)
 		recorder := httptest.NewRecorder()
-		connectionPool.Fetch("", recorder)
+		connectionPool.Fetch(recorder, request)
 
 		assertion.Equal(recorder.Code, http.StatusServiceUnavailable)
 	})
@@ -67,18 +67,20 @@ func TestFetch(t *testing.T) {
 		unavailableServer := httptest.NewServer(unavailableHandler)
 		defer unavailableServer.Close()
 
+		healthyBackend, _ := url.ParseRequestURI(availableServer.URL)
 		healthyConnection := &connection{
 			backend:  availableServer.URL,
 			healthy:  true,
-			client:   client,
 			messages: make(chan bool),
+			proxy:    httputil.NewSingleHostReverseProxy(healthyBackend),
 		}
 
+		unhealthyBackend, _ := url.ParseRequestURI(unavailableServer.URL)
 		unhealthyConnection := &connection{
 			backend:  unavailableServer.URL,
 			healthy:  false,
-			client:   client,
 			messages: make(chan bool),
+			proxy:    httputil.NewSingleHostReverseProxy(unhealthyBackend),
 		}
 
 		connectionPool := New([]string{}, 10)
@@ -87,8 +89,10 @@ func TestFetch(t *testing.T) {
 
 		defer connectionPool.Shutdown()
 
+		reader := strings.NewReader("This is a test")
+		request := httptest.NewRequest("GET", "http://www.test.com/hello", reader)
 		recorder := httptest.NewRecorder()
-		connectionPool.Fetch("/hello", recorder)
+		connectionPool.Fetch(recorder, request)
 
 		<-availableResChan
 
