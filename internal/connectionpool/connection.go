@@ -17,8 +17,11 @@ type connection struct {
 	proxy  *httputil.ReverseProxy
 }
 
-func newConnection(backend string, client *http.Client) *connection {
-	url, _ := url.Parse(backend)
+func newConnection(backend string, client *http.Client) (*connection, error) {
+	url, err := url.Parse(backend)
+	if err != nil {
+		return nil, err
+	}
 
 	conn := &connection{
 		backend:  backend,
@@ -31,7 +34,7 @@ func newConnection(backend string, client *http.Client) *connection {
 
 	go conn.healthCheck()
 
-	return conn
+	return conn, nil
 }
 
 func (c *connection) get(w http.ResponseWriter, r *http.Request) error {
