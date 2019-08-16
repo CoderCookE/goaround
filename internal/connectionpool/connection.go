@@ -4,33 +4,23 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"sync"
 )
 
 type connection struct {
-	backend  string
 	healthy  bool
 	messages chan bool
+	backend  string
 	sync.RWMutex
-	client *http.Client
-	proxy  *httputil.ReverseProxy
+	proxy *httputil.ReverseProxy
 }
 
-func newConnection(backend string, client *http.Client) (*connection, error) {
-	url, err := url.Parse(backend)
-	if err != nil {
-		return nil, err
-	}
-
+func newConnection(proxy *httputil.ReverseProxy, backend string) (*connection, error) {
 	conn := &connection{
 		backend:  backend,
-		client:   client,
 		messages: make(chan bool),
-		proxy:    httputil.NewSingleHostReverseProxy(url),
+		proxy:    proxy,
 	}
-
-	conn.proxy.Transport = client.Transport
 
 	go conn.healthCheck()
 

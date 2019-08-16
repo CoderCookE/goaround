@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"time"
 )
 
@@ -30,9 +32,9 @@ func New(backends []string, maxRequests int) *pool {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 30 * time.Second,
 		ResponseHeaderTimeout: 50 * time.Second,
-		MaxIdleConns:          maxRequests,
-		IdleConnTimeout:       30 * time.Second,
-		MaxIdleConnsPerHost:   connsPerBackend,
+		MaxIdleConns:          maxRequests + backendCount,
+		IdleConnTimeout:       120 * time.Second,
+		MaxIdleConnsPerHost:   maxRequests + backendCount,
 	}
 
 	client := &http.Client{Transport: tr}
@@ -43,27 +45,35 @@ func New(backends []string, maxRequests int) *pool {
 
 	poolConnections := make([]*connection, 0)
 
-	for _, back := range backends {
-		newConnection, err := newConnection(back, client)
+	for _, backend := range backends {
+		url, err := url.ParseRequestURI(backend)
 		if err != nil {
-			log.Printf("Error adding connection for: %s", back)
+			log.Printf("error parsing backend url: %s", backend)
 		} else {
-			backendConnections := make([]chan bool, connsPerBackend)
+			proxy := httputil.NewSingleHostReverseProxy(url)
+			proxy.Transport = client.Transport
 
-			for i := 0; i < connsPerBackend; i++ {
-				poolConnections = append(poolConnections, newConnection)
-				backendConnections[i] = newConnection.messages
+			newConnection, err := newConnection(proxy, backend)
+			if err != nil {
+				log.Printf("Error adding connection for: %s", backend)
+			} else {
+				backendConnections := make([]chan bool, connsPerBackend)
+
+				for i := 0; i < connsPerBackend; i++ {
+					poolConnections = append(poolConnections, newConnection)
+					backendConnections[i] = newConnection.messages
+				}
+
+				hc := &healthChecker{
+					client:      client,
+					subscribers: backendConnections,
+					backend:     newConnection.backend,
+					done:        make(chan bool, 1),
+				}
+
+				connectionPool.healthChecks = append(connectionPool.healthChecks, hc)
+				go hc.Start()
 			}
-
-			hc := &healthChecker{
-				client:      client,
-				subscribers: backendConnections,
-				backend:     newConnection.backend,
-				done:        make(chan bool, 1),
-			}
-
-			connectionPool.healthChecks = append(connectionPool.healthChecks, hc)
-			go hc.Start()
 		}
 	}
 

@@ -2,6 +2,8 @@ package connectionpool
 
 import (
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"testing"
 	"time"
 
@@ -14,11 +16,19 @@ func TestHealthCheck(t *testing.T) {
 		IdleConnTimeout: 1 * time.Second,
 	}
 
-	client := &http.Client{Transport: tr}
 	assertion := &assert.Asserter{T: t}
 
 	t.Run("backend returns a healthy state", func(t *testing.T) {
-		conn := newConnection("", client)
+		backend := "http://www.google.com/"
+
+		url, err := url.ParseRequestURI(backend)
+		assertion.Equal(err, nil)
+
+		proxy := httputil.NewSingleHostReverseProxy(url)
+		proxy.Transport = tr
+
+		conn, err := newConnection(proxy, backend)
+		assertion.Equal(err, nil)
 
 		assertion.False(conn.healthy)
 		conn.messages <- true
