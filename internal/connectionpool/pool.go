@@ -31,15 +31,18 @@ func New(backends []string, connsPerBackend int) *pool {
 			Timeout: 3 * time.Second,
 		}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 30 * time.Second,
-		ResponseHeaderTimeout: 50 * time.Second,
+		ExpectContinueTimeout: 10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 		MaxIdleConns:          maxRequests + backendCount,
 		IdleConnTimeout:       120 * time.Second,
 		MaxConnsPerHost:       connsPerBackend + 1,
 		MaxIdleConnsPerHost:   connsPerBackend + 1,
 	}
 
-	client := &http.Client{Transport: tr}
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: tr,
+	}
 
 	connectionPool := &pool{
 		connections: make(chan *connection, maxRequests),

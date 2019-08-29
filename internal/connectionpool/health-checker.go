@@ -1,6 +1,7 @@
 package connectionpool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -23,13 +24,17 @@ type healthChecker struct {
 }
 
 func (hc *healthChecker) Start() {
-	hc.check()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
+	hc.check(ctx)
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	for {
 		select {
 		case <-ticker.C:
-			hc.check()
+			cancel()
+			ctx, cancel = context.WithCancel(context.Background())
+			hc.check(ctx)
 		case <-hc.done:
 			ticker.Stop()
 			return
@@ -37,12 +42,12 @@ func (hc *healthChecker) Start() {
 	}
 }
 
-func (hc *healthChecker) check() {
+func (hc *healthChecker) check(ctx context.Context) {
 	url := fmt.Sprintf("%s%s", hc.backend, "/health")
-
 	healthy := hc.currentHealth
 
-	if resp, err := hc.client.Get(url); err != nil {
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
 		log.Printf("Error with health check, backend: %s, error %s", hc.backend, err.Error())
 		healthy = false
 	} else {
