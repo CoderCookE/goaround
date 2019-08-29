@@ -17,12 +17,12 @@ type pool struct {
 
 //Exported method for creation of a connection-pool takes []string
 //ex: ['http://localhost:9000','http://localhost:9000']
-func New(backends []string, maxRequests int) *pool {
-	var connsPerBackend int
+func New(backends []string, connsPerBackend int) *pool {
+	var maxRequests int
 	backendCount := len(backends)
 
 	if backendCount > 0 {
-		connsPerBackend = maxRequests / backendCount
+		maxRequests = connsPerBackend * backendCount
 	}
 
 	tr := &http.Transport{
@@ -34,7 +34,7 @@ func New(backends []string, maxRequests int) *pool {
 		ResponseHeaderTimeout: 50 * time.Second,
 		MaxIdleConns:          maxRequests + backendCount,
 		IdleConnTimeout:       120 * time.Second,
-		MaxIdleConnsPerHost:   maxRequests + backendCount,
+		MaxIdleConnsPerHost:   connsPerBackend + 1,
 	}
 
 	client := &http.Client{Transport: tr}
