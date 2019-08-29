@@ -34,6 +34,7 @@ func New(backends []string, connsPerBackend int) *pool {
 		ResponseHeaderTimeout: 50 * time.Second,
 		MaxIdleConns:          maxRequests + backendCount,
 		IdleConnTimeout:       120 * time.Second,
+		MaxConnsPerHost:       connsPerBackend + 1,
 		MaxIdleConnsPerHost:   connsPerBackend + 1,
 	}
 
