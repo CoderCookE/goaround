@@ -2,6 +2,7 @@ package connectionpool
 
 import (
 	"log"
+	"math"
 	"math/rand"
 	"net"
 	"net/http"
@@ -19,7 +20,7 @@ type pool struct {
 //ex: ['http://localhost:9000','http://localhost:9000']
 func New(backends []string, connsPerBackend int) *pool {
 	var maxRequests int
-	backendCount := len(backends)
+	backendCount := int(math.Max(float64(len(backends)), float64(1)))
 
 	if backendCount > 0 {
 		maxRequests = connsPerBackend * backendCount
