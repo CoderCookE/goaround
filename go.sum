@@ -1,2 +1,10 @@
 github.com/codercooke/goaround v0.0.0-20190726005525-216236838df3 h1:SH0qcVMNgZgsuUM8/xtmBtigM4UBvoCfuCQqsWBMo58=
 github.com/codercooke/goaround v0.0.0-20190726005525-216236838df3/go.mod h1:l53nwp2tMBWyIWF0fHoVLBj5tKcovj0yC4LNp3CrvAY=
+github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/dgraph-io/ristretto v0.0.0-20191004195602-f823dc4a5031 h1:puinfjvl1jM3YaODRJ63nURwCuY+7r2gaOxE4ON+68E=
+github.com/dgraph-io/ristretto v0.0.0-20191004195602-f823dc4a5031/go.mod h1:jg4yDfbNNmxP2Nq5Z7MbyQrXyl/syIRF2LnbbxqViho=
+github.com/dgryski/go-farm v0.0.0-20190423205320-6a90982ecee2/go.mod h1:SqUrOPUnsFjfmXRMNPybcSiG0BgUW2AuFH8PAnS2iTw=
+github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
+github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=

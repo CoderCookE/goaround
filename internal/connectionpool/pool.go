@@ -1,6 +1,9 @@
 package connectionpool
 
 import (
+	"bytes"
+	"github.com/dgraph-io/ristretto"
+	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -50,15 +53,42 @@ func New(backends []string, connsPerBackend int) *pool {
 
 	poolConnections := make([]*connection, 0)
 
+	var cacheResponse func(*http.Response) error
+	var cacheEnabled bool
+	var cache *ristretto.Cache
+	var err error
+
+	if cache, err = buildCache(); err != nil {
+		cacheEnabled = false
+	}
+
 	for _, backend := range backends {
 		url, err := url.ParseRequestURI(backend)
 		if err != nil {
 			log.Printf("error parsing backend url: %s", backend)
 		} else {
 			proxy := httputil.NewSingleHostReverseProxy(url)
+
+			cacheResponse = func(r *http.Response) error {
+				body, err := ioutil.ReadAll(r.Body)
+				cacheable := string(body)
+				r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+				path := r.Request.URL.Path
+				if err == nil {
+					cache.Set(path, cacheable, 1)
+				}
+
+				return nil
+			}
+
 			proxy.Transport = client.Transport
 
-			newConnection, err := newConnection(proxy, backend)
+			if !cacheEnabled {
+				proxy.ModifyResponse = cacheResponse
+			}
+
+			newConnection, err := newConnection(proxy, backend, cache)
 			if err != nil {
 				log.Printf("Error adding connection for: %s", backend)
 			} else {
@@ -96,6 +126,16 @@ func shuffle(conns []*connection, ch chan *connection) {
 	for _, conn := range conns {
 		ch <- conn
 	}
+}
+
+func buildCache() (*ristretto.Cache, error) {
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,     // number of keys to track frequency of (10M).
+		MaxCost:     1 << 30, // maximum cost of cache (1GB).
+		BufferItems: 64,      // number of keys per Get buffer.
+	})
+
+	return cache, err
 }
 
 //Exported method for passing a request to a connection from the pool
