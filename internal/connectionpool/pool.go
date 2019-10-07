@@ -28,7 +28,7 @@ func New(backends []string, connsPerBackend int) *pool {
 
 	tr := &http.Transport{
 		DialContext: (&net.Dialer{
-			Timeout: 3 * time.Second,
+			Timeout: 10 * time.Second,
 		}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 10 * time.Second,
