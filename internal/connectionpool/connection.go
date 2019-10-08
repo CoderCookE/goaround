@@ -50,8 +50,10 @@ func (c *connection) healthCheck() {
 	for {
 		healthy := <-c.messages
 		health := healthy.health
+		backend := healthy.backend
 		c.Lock()
 		c.healthy = health
+		c.backend = backend
 		c.Unlock()
 	}
 }

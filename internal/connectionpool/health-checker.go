@@ -51,8 +51,8 @@ func (hc *healthChecker) Start() {
 
 func (hc *healthChecker) Reuse(newBackend string) {
 	hc.Lock()
-	hc.notifySubscribers(false)
 	hc.backend = newBackend
+	hc.notifySubscribers(true, hc.backend)
 	hc.Unlock()
 }
 
@@ -88,12 +88,12 @@ func (hc *healthChecker) check(ctx context.Context) {
 
 	if healthy != hc.currentHealth {
 		hc.currentHealth = healthy
-		hc.notifySubscribers(healthy)
+		hc.notifySubscribers(healthy, hc.backend)
 	}
 }
 
-func (hc *healthChecker) notifySubscribers(healthy bool) {
-	message := message{health: healthy}
+func (hc *healthChecker) notifySubscribers(healthy bool, backend string) {
+	message := message{health: healthy, backend: backend}
 
 	for _, c := range hc.subscribers {
 		c <- message

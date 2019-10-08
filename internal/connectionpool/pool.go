@@ -28,7 +28,7 @@ func New(backends []string, connsPerBackend int) *pool {
 	backendCount := int(math.Max(float64(len(backends)), float64(1)))
 
 	if backendCount > 0 {
-		maxRequests = connsPerBackend * backendCount
+		maxRequests = connsPerBackend * backendCount * 2
 	}
 
 	tr := &http.Transport{
@@ -148,9 +148,13 @@ func (p *pool) ListenForBackendChanges() {
 			delete(p.healthChecks, removedBackend)
 		}
 
+		poolConnections := make([]*connection, 0)
 		for _, addedBackend := range added {
-			println(addedBackend)
+			newConnection := p.addBackend(addedBackend)
+			poolConnections = append(poolConnections, newConnection)
 		}
+
+		shuffle(poolConnections, p.connections)
 	}
 }
 
