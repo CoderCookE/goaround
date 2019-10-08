@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/CoderCookE/goaround/internal/assert"
+	"github.com/dgraph-io/ristretto"
 )
 
 func TestHealthCheck(t *testing.T) {
@@ -21,13 +22,20 @@ func TestHealthCheck(t *testing.T) {
 	t.Run("backend returns a healthy state", func(t *testing.T) {
 		backend := "http://www.google.com/"
 
+		cache, err := ristretto.NewCache(&ristretto.Config{
+			NumCounters: 1e7,     // number of keys to track frequency of (10M).
+			MaxCost:     1 << 30, // maximum cost of cache (1GB).
+			BufferItems: 64,      // number of keys per Get buffer.
+		})
+		assertion.Equal(err, nil)
+
 		url, err := url.ParseRequestURI(backend)
 		assertion.Equal(err, nil)
 
 		proxy := httputil.NewSingleHostReverseProxy(url)
 		proxy.Transport = tr
 
-		conn, err := newConnection(proxy, backend)
+		conn, err := newConnection(proxy, backend, cache)
 		assertion.Equal(err, nil)
 
 		assertion.False(conn.healthy)
