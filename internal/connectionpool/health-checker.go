@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -16,7 +17,8 @@ type healthCheckReponse struct {
 }
 
 type healthChecker struct {
-	subscribers   []chan bool
+	sync.Mutex
+	subscribers   []chan message
 	currentHealth bool
 	client        *http.Client
 	backend       string
@@ -27,14 +29,19 @@ func (hc *healthChecker) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	hc.Lock()
 	hc.check(ctx)
+	hc.Unlock()
+
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	for {
 		select {
 		case <-ticker.C:
 			cancel()
+			hc.Lock()
 			ctx, cancel = context.WithCancel(context.Background())
 			hc.check(ctx)
+			hc.Unlock()
 		case <-hc.done:
 			ticker.Stop()
 			return
@@ -42,12 +49,26 @@ func (hc *healthChecker) Start() {
 	}
 }
 
+func (hc *healthChecker) Reuse(newBackend string) {
+	hc.Lock()
+	hc.notifySubscribers(false)
+	hc.backend = newBackend
+	hc.Unlock()
+}
+
+func (hc *healthChecker) Remove() {
+
+}
+
 func (hc *healthChecker) check(ctx context.Context) {
 	url := fmt.Sprintf("%s%s", hc.backend, "/health")
 	healthy := hc.currentHealth
 
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		log.Printf("Error creating request: %s, error %s", hc.backend, err.Error())
+		healthy = false
+	} else if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
 		log.Printf("Error with health check, backend: %s, error %s", hc.backend, err.Error())
 		healthy = false
 	} else {
@@ -67,9 +88,15 @@ func (hc *healthChecker) check(ctx context.Context) {
 
 	if healthy != hc.currentHealth {
 		hc.currentHealth = healthy
-		for _, c := range hc.subscribers {
-			c <- healthy
-		}
+		hc.notifySubscribers(healthy)
+	}
+}
+
+func (hc *healthChecker) notifySubscribers(healthy bool) {
+	message := message{health: healthy}
+
+	for _, c := range hc.subscribers {
+		c <- message
 	}
 }
 
