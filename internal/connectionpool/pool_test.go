@@ -17,7 +17,11 @@ func TestFetch(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
 	t.Run("No backends available, returns 503", func(t *testing.T) {
-		connectionPool := New([]string{}, 1)
+		config := &Config{
+			Backends: []string{},
+			NumConns: 1,
+		}
+		connectionPool := New(config)
 		defer connectionPool.Shutdown()
 
 		reader := strings.NewReader("This is a test")
@@ -37,7 +41,12 @@ func TestFetch(t *testing.T) {
 		defer unavailableServer.Close()
 
 		backends := []string{unavailableServer.URL}
-		connectionPool := New(backends, 1)
+		config := &Config{
+			Backends: backends,
+			NumConns: 1,
+		}
+
+		connectionPool := New(config)
 		defer connectionPool.Shutdown()
 
 		reader := strings.NewReader("This is a test")
@@ -83,7 +92,11 @@ func TestFetch(t *testing.T) {
 			proxy:    httputil.NewSingleHostReverseProxy(unhealthyBackend),
 		}
 
-		connectionPool := New([]string{}, 10)
+		config := &Config{
+			Backends: []string{},
+			NumConns: 10,
+		}
+		connectionPool := New(config)
 		connectionPool.connections <- unhealthyConnection
 		connectionPool.connections <- healthyConnection
 

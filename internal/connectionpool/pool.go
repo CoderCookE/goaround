@@ -21,7 +21,11 @@ type pool struct {
 
 //Exported method for creation of a connection-pool takes []string
 //ex: ['http://localhost:9000','http://localhost:9000']
-func New(backends []string, connsPerBackend int) *pool {
+func New(c *Config) *pool {
+	backends := c.Backends
+	connsPerBackend := c.NumConns
+	cacheEnabled := c.EnableCache
+
 	var maxRequests int
 	backendCount := int(math.Max(float64(len(backends)), float64(1)))
 
@@ -53,8 +57,6 @@ func New(backends []string, connsPerBackend int) *pool {
 
 	poolConnections := make([]*connection, 0)
 
-	var cacheResponse func(*http.Response) error
-	var cacheEnabled bool
 	var cache *ristretto.Cache
 	var err error
 
@@ -64,27 +66,28 @@ func New(backends []string, connsPerBackend int) *pool {
 
 	for _, backend := range backends {
 		url, err := url.ParseRequestURI(backend)
+		var cacheResponse func(*http.Response) error
+
 		if err != nil {
 			log.Printf("error parsing backend url: %s", backend)
 		} else {
 			proxy := httputil.NewSingleHostReverseProxy(url)
-
-			cacheResponse = func(r *http.Response) error {
-				body, err := ioutil.ReadAll(r.Body)
-				cacheable := string(body)
-				r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-
-				path := r.Request.URL.Path
-				if err == nil {
-					cache.Set(path, cacheable, 1)
-				}
-
-				return nil
-			}
-
 			proxy.Transport = client.Transport
 
-			if !cacheEnabled {
+			if cacheEnabled {
+				cacheResponse = func(r *http.Response) error {
+					body, err := ioutil.ReadAll(r.Body)
+					cacheable := string(body)
+					r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+					path := r.Request.URL.Path
+					if err == nil {
+						cache.Set(path, cacheable, 1)
+					}
+
+					return nil
+				}
+
 				proxy.ModifyResponse = cacheResponse
 			}
 
