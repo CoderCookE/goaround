@@ -59,14 +59,13 @@ func New(c *Config) *pool {
 
 	var cache *ristretto.Cache
 	var err error
-
 	if cache, err = buildCache(); err != nil {
+		log.Printf("Error creating cache: %v", err)
 		cacheEnabled = false
 	}
 
 	for _, backend := range backends {
 		url, err := url.ParseRequestURI(backend)
-		var cacheResponse func(*http.Response) error
 
 		if err != nil {
 			log.Printf("error parsing backend url: %s", backend)
@@ -75,7 +74,7 @@ func New(c *Config) *pool {
 			proxy.Transport = client.Transport
 
 			if cacheEnabled {
-				cacheResponse = func(r *http.Response) error {
+				cacheResponse := func(r *http.Response) error {
 					body, err := ioutil.ReadAll(r.Body)
 					cacheable := string(body)
 					r.Body = ioutil.NopCloser(bytes.NewBuffer(body))

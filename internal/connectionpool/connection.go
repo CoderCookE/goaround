@@ -32,9 +32,9 @@ func newConnection(proxy *httputil.ReverseProxy, backend string, cache *ristrett
 
 func (c *connection) get(w http.ResponseWriter, r *http.Request) error {
 	c.RLock()
-	health := c.healthy
-	c.RUnlock()
+	defer c.RUnlock()
 
+	health := c.healthy
 	err := errors.New("Unhealthy Node")
 	if c.cache != nil {
 		value, found := c.cache.Get(r.URL.Path)
