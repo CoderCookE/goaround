@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/CoderCookE/goaround/internal/assert"
@@ -19,20 +20,24 @@ func TestFetch(t *testing.T) {
 		t.Run("Fetches from cache", func(t *testing.T) {
 			callCount := 0
 			availableResChan := make(chan bool, 1)
-
+			wg := &sync.WaitGroup{}
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
-				healthMessage, _ := json.Marshal(healthReponse)
+				var message []byte
 
 				if r.URL.Path == "/health" {
+					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+					message, _ = json.Marshal(healthReponse)
+
 					availableResChan <- true
 				}
 
 				if r.URL.Path == "/foo" {
+					wg.Done()
 					callCount += 1
+					message = []byte("hello")
 				}
 
-				w.Write(healthMessage)
+				w.Write(message)
 			})
 
 			availableServer := httptest.NewServer(availableHandler)
@@ -48,6 +53,7 @@ func TestFetch(t *testing.T) {
 			connectionPool := New(config)
 			defer connectionPool.Shutdown()
 			<-availableResChan
+			wg.Add(1)
 			for i := 0; i < 5; i++ {
 				reader := strings.NewReader("This is a test")
 				request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
@@ -56,8 +62,9 @@ func TestFetch(t *testing.T) {
 				result, err := ioutil.ReadAll(recorder.Result().Body)
 				assertion.Equal(err, nil)
 				assertion.Equal(recorder.Code, http.StatusOK)
-				assertion.Equal(string(result), `{"state":"healthy","message":""}`)
-				assertion.Equal(callCount, 1) //healthcheck and cacheable request
+				assertion.Equal(string(result), "hello")
+				assertion.Equal(callCount, 1)
+				wg.Wait()
 			}
 		})
 	})
