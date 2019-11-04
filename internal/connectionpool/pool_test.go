@@ -23,8 +23,15 @@ func TestFetch(t *testing.T) {
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
 				healthMessage, _ := json.Marshal(healthReponse)
-				availableResChan <- true
-				callCount += 1
+
+				if r.URL.Path == "/health" {
+					availableResChan <- true
+				}
+
+				if r.URL.Path == "/foo" {
+					callCount += 1
+				}
+
 				w.Write(healthMessage)
 			})
 
@@ -40,18 +47,17 @@ func TestFetch(t *testing.T) {
 
 			connectionPool := New(config)
 			defer connectionPool.Shutdown()
-
 			<-availableResChan
 			for i := 0; i < 5; i++ {
 				reader := strings.NewReader("This is a test")
-				request := httptest.NewRequest("GET", "http://www.test.com/health", reader)
+				request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
 				recorder := httptest.NewRecorder()
 				connectionPool.Fetch(recorder, request)
 				result, err := ioutil.ReadAll(recorder.Result().Body)
 				assertion.Equal(err, nil)
 				assertion.Equal(recorder.Code, http.StatusOK)
 				assertion.Equal(string(result), `{"state":"healthy","message":""}`)
-				assertion.Equal(callCount, 2) //healthcheck and cacheable request
+				assertion.Equal(callCount, 1) //healthcheck and cacheable request
 			}
 		})
 	})
