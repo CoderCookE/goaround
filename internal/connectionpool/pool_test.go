@@ -19,20 +19,22 @@ func TestFetch(t *testing.T) {
 		t.Run("Fetches from cache", func(t *testing.T) {
 			callCount := 0
 			availableResChan := make(chan bool, 1)
-
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
-				healthMessage, _ := json.Marshal(healthReponse)
+				var message []byte
 
 				if r.URL.Path == "/health" {
+					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+					message, _ = json.Marshal(healthReponse)
+
 					availableResChan <- true
 				}
 
 				if r.URL.Path == "/foo" {
 					callCount += 1
+					message = []byte("hello")
 				}
 
-				w.Write(healthMessage)
+				w.Write(message)
 			})
 
 			availableServer := httptest.NewServer(availableHandler)
@@ -56,8 +58,8 @@ func TestFetch(t *testing.T) {
 				result, err := ioutil.ReadAll(recorder.Result().Body)
 				assertion.Equal(err, nil)
 				assertion.Equal(recorder.Code, http.StatusOK)
-				assertion.Equal(string(result), `{"state":"healthy","message":""}`)
-				assertion.Equal(callCount, 1) //healthcheck and cacheable request
+				assertion.Equal(string(result), "hello")
+				assertion.Equal(callCount, 1)
 			}
 		})
 	})
