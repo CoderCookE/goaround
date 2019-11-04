@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/CoderCookE/goaround/internal/assert"
@@ -19,6 +20,7 @@ func TestFetch(t *testing.T) {
 		t.Run("Fetches from cache", func(t *testing.T) {
 			callCount := 0
 			availableResChan := make(chan bool, 1)
+			wg := &sync.WaitGroup{}
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var message []byte
 
@@ -30,6 +32,7 @@ func TestFetch(t *testing.T) {
 				}
 
 				if r.URL.Path == "/foo" {
+					wg.Done()
 					callCount += 1
 					message = []byte("hello")
 				}
@@ -50,6 +53,7 @@ func TestFetch(t *testing.T) {
 			connectionPool := New(config)
 			defer connectionPool.Shutdown()
 			<-availableResChan
+			wg.Add(1)
 			for i := 0; i < 5; i++ {
 				reader := strings.NewReader("This is a test")
 				request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
@@ -60,6 +64,7 @@ func TestFetch(t *testing.T) {
 				assertion.Equal(recorder.Code, http.StatusOK)
 				assertion.Equal(string(result), "hello")
 				assertion.Equal(callCount, 1)
+				wg.Wait()
 			}
 		})
 	})
