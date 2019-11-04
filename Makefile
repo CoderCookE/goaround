@@ -8,7 +8,7 @@ default: bin
 
 bin:
 	mkdir -p bin
-	cd ./cmd/goaround/ && go build -o ../../bin/$(APP_NAME)
+	cd ./ && go build -o ./bin/$(APP_NAME)
 	shasum -a 1 ./bin/goaround > ./bin/shasum
 
 test:

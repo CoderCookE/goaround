@@ -12,11 +12,17 @@ import (
 )
 
 func main() {
-	portString, backends, numConns, cacert, privkey := parseFlags()
+	portString, backends, numConns, cacert, privkey, enableCache := parseFlags()
+
+	config := &connectionpool.Config{
+		Backends:    backends,
+		NumConns:    *numConns,
+		EnableCache: *enableCache,
+	}
 
 	log.Printf("Starting with conf, %s %s %d", portString, backends, *numConns)
 
-	connectionPool := connectionpool.New(backends, *numConns)
+	connectionPool := connectionpool.New(config)
 	defer connectionPool.Shutdown()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -46,16 +52,17 @@ func main() {
 	}
 }
 
-func parseFlags() (portString string, backends customflags.Backend, numConns *int, cacert *string, privkey *string) {
+func parseFlags() (portString string, backends customflags.Backend, numConns *int, cacert *string, privkey *string, enableCache *bool) {
 	port := flag.Int("p", 3000, "Load Balancer Listen Port (default: 3000)")
 	numConns = flag.Int("n", 3, "Max number of connections per backend")
 
 	backends = make(customflags.Backend, 0)
-	flag.Var(&backends, "b", "Backend location ex: http://localhost:9000))")
+	flag.Var(&backends, "b", "Backend location ex: http://localhost:9000")
 
 	cacert = flag.String("cacert", "", "cacert location")
 	privkey = flag.String("privkey", "", "privkey location")
 
+	enableCache = flag.Bool("cache", false, "Enable request cache")
 	flag.Parse()
 	portString = fmt.Sprintf(":%d", *port)
 

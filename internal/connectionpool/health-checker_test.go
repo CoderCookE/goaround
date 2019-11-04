@@ -20,7 +20,7 @@ func TestHealthChecker(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
 	t.Run("backend returns a healthy state", func(t *testing.T) {
-		resChan := make(chan bool, 1)
+		resChan := make(chan message, 1)
 
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
@@ -33,7 +33,7 @@ func TestHealthChecker(t *testing.T) {
 
 		hc := healthChecker{
 			client:        client,
-			subscribers:   []chan bool{resChan},
+			subscribers:   []chan message{resChan},
 			backend:       availableServer.URL,
 			done:          make(chan bool),
 			currentHealth: false,
@@ -44,11 +44,11 @@ func TestHealthChecker(t *testing.T) {
 
 		health := <-resChan
 
-		assertion.True(health)
+		assertion.True(health.health)
 	})
 
 	t.Run("backend returns a degraded state", func(t *testing.T) {
-		resChan := make(chan bool, 1)
+		resChan := make(chan message, 1)
 
 		degradedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			healthReponse := &healthCheckReponse{State: "degraded", Message: ""}
@@ -61,7 +61,7 @@ func TestHealthChecker(t *testing.T) {
 
 		hc := healthChecker{
 			client:        client,
-			subscribers:   []chan bool{resChan},
+			subscribers:   []chan message{resChan},
 			backend:       degradedServer.URL,
 			done:          make(chan bool),
 			currentHealth: true,
@@ -72,6 +72,6 @@ func TestHealthChecker(t *testing.T) {
 
 		health := <-resChan
 
-		assertion.False(health)
+		assertion.False(health.health)
 	})
 }
