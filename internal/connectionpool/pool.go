@@ -1,6 +1,9 @@
 package connectionpool
 
 import (
+	"bytes"
+	"github.com/dgraph-io/ristretto"
+	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -18,7 +21,11 @@ type pool struct {
 
 //Exported method for creation of a connection-pool takes []string
 //ex: ['http://localhost:9000','http://localhost:9000']
-func New(backends []string, connsPerBackend int) *pool {
+func New(c *Config) *pool {
+	backends := c.Backends
+	connsPerBackend := c.NumConns
+	cacheEnabled := c.EnableCache
+
 	var maxRequests int
 	backendCount := int(math.Max(float64(len(backends)), float64(1)))
 
@@ -50,15 +57,40 @@ func New(backends []string, connsPerBackend int) *pool {
 
 	poolConnections := make([]*connection, 0)
 
+	var cache *ristretto.Cache
+	var err error
+	if cache, err = buildCache(); err != nil {
+		log.Printf("Error creating cache: %v", err)
+		cacheEnabled = false
+	}
+
 	for _, backend := range backends {
 		url, err := url.ParseRequestURI(backend)
+
 		if err != nil {
 			log.Printf("error parsing backend url: %s", backend)
 		} else {
 			proxy := httputil.NewSingleHostReverseProxy(url)
 			proxy.Transport = client.Transport
 
-			newConnection, err := newConnection(proxy, backend)
+			if cacheEnabled {
+				cacheResponse := func(r *http.Response) error {
+					body, err := ioutil.ReadAll(r.Body)
+					cacheable := string(body)
+					r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+					path := r.Request.URL.Path
+					if err == nil {
+						cache.Set(path, cacheable, 1)
+					}
+
+					return nil
+				}
+
+				proxy.ModifyResponse = cacheResponse
+			}
+
+			newConnection, err := newConnection(proxy, backend, cache)
 			if err != nil {
 				log.Printf("Error adding connection for: %s", backend)
 			} else {
@@ -96,6 +128,16 @@ func shuffle(conns []*connection, ch chan *connection) {
 	for _, conn := range conns {
 		ch <- conn
 	}
+}
+
+func buildCache() (*ristretto.Cache, error) {
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,     // number of keys to track frequency of (10M).
+		MaxCost:     1 << 30, // maximum cost of cache (1GB).
+		BufferItems: 64,      // number of keys per Get buffer.
+	})
+
+	return cache, err
 }
 
 //Exported method for passing a request to a connection from the pool
