@@ -27,6 +27,7 @@ func main() {
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		defer r.Body.Close()
 		connectionPool.Fetch(w, r)
 		log.Printf("Request completed in %v seconds", time.Since(start).Seconds())
 	})

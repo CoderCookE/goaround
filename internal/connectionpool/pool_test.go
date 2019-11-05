@@ -5,8 +5,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
-	"net/http/httputil"
-	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -54,70 +52,103 @@ func TestFetch(t *testing.T) {
 			defer connectionPool.Shutdown()
 			<-availableResChan
 			wg.Add(1)
+
 			for i := 0; i < 5; i++ {
 				reader := strings.NewReader("This is a test")
 				request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
 				recorder := httptest.NewRecorder()
 				connectionPool.Fetch(recorder, request)
+
+				wg.Wait()
+
 				result, err := ioutil.ReadAll(recorder.Result().Body)
 				assertion.Equal(err, nil)
 				assertion.Equal(recorder.Code, http.StatusOK)
 				assertion.Equal(string(result), "hello")
 				assertion.Equal(callCount, 1)
-				wg.Wait()
 			}
 		})
 	})
 
 	t.Run("No cache", func(t *testing.T) {
-		t.Run("No backends available, returns 503", func(t *testing.T) {
-			config := &Config{
-				Backends: []string{},
-				NumConns: 1,
-			}
-			connectionPool := New(config)
-			defer connectionPool.Shutdown()
+		// 		t.Run("fetches each request from server", func(t *testing.T) {
+		// 			callCount := 0
+		// 			availableResChan := make(chan bool, 1)
+		// 			wg := &sync.WaitGroup{}
 
-			reader := strings.NewReader("This is a test")
-			request := httptest.NewRequest("GET", "http://www.test.com/hello", reader)
-			recorder := httptest.NewRecorder()
-			connectionPool.Fetch(recorder, request)
+		// 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 				var message []byte
 
-			assertion.Equal(recorder.Code, http.StatusServiceUnavailable)
-		})
+		// 				if r.URL.Path == "/health" {
+		// 					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+		// 					message, _ = json.Marshal(healthReponse)
 
-		t.Run("none of the instances are healthy, should return an HTTP 503 response code", func(t *testing.T) {
-			unavailableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusInternalServerError)
-			})
+		// 					availableResChan <- true
+		// 				}
 
-			unavailableServer := httptest.NewServer(unavailableHandler)
-			defer unavailableServer.Close()
+		// 				println(r.URL.Path)
+		// 				if r.URL.Path == "/foo" {
+		// 					wg.Done()
+		// 					callCount += 1
+		// 					message = []byte("hello")
+		// 				}
 
-			backends := []string{unavailableServer.URL}
-			config := &Config{
-				Backends: backends,
-				NumConns: 1,
-			}
+		// 				w.Write(message)
+		// 			})
 
-			connectionPool := New(config)
-			defer connectionPool.Shutdown()
+		// 			availableServer := httptest.NewServer(availableHandler)
+		// 			defer availableServer.Close()
 
-			reader := strings.NewReader("This is a test")
-			request := httptest.NewRequest("GET", "http://www.test.com/hello", reader)
-			recorder := httptest.NewRecorder()
-			connectionPool.Fetch(recorder, request)
+		// 			backends := []string{availableServer.URL}
+		// 			config := &Config{
+		// 				Backends: backends,
+		// 				NumConns: 10,
+		// 			}
 
-			assertion.Equal(recorder.Code, http.StatusServiceUnavailable)
-		})
+		// 			connectionPool := New(config)
+		// 			defer connectionPool.Shutdown()
+		// 			<-availableResChan
+
+		// 			for i := 0; i < 5; i++ {
+		// 				wg.Add(1)
+		// 				reader := strings.NewReader("This is a test")
+		// 				request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
+		// 				recorder := httptest.NewRecorder()
+		// 				connectionPool.Fetch(recorder, request)
+
+		// 				wg.Wait()
+
+		// 				result, err := ioutil.ReadAll(recorder.Result().Body)
+		// 				assertion.Equal(err, nil)
+		// 				assertion.Equal(recorder.Code, http.StatusOK)
+		// 				assertion.Equal(string(result), "hello")
+		// 			}
+
+		// 			assertion.Equal(callCount, 5)
+		// 		})
 
 		t.Run("First connection tried is degraded, Uses next connections", func(t *testing.T) {
+			callCount := 0
 			availableResChan := make(chan bool, 1)
+			wg := &sync.WaitGroup{}
+
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
-				healthMessage, _ := json.Marshal(healthReponse)
-				availableResChan <- true
-				w.Write(healthMessage)
+				var message []byte
+
+				if r.URL.Path == "/health" {
+					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+					message, _ = json.Marshal(healthReponse)
+
+					availableResChan <- true
+				}
+
+				if r.URL.Path == "/foo" {
+					wg.Done()
+					callCount += 1
+					message = []byte("hello")
+				}
+
+				w.Write(message)
 			})
 
 			availableServer := httptest.NewServer(availableHandler)
@@ -130,44 +161,27 @@ func TestFetch(t *testing.T) {
 			unavailableServer := httptest.NewServer(unavailableHandler)
 			defer unavailableServer.Close()
 
-			healthyBackend, _ := url.ParseRequestURI(availableServer.URL)
-			healthyConnection := &connection{
-				backend:  availableServer.URL,
-				healthy:  true,
-				messages: make(chan message),
-				proxy:    httputil.NewSingleHostReverseProxy(healthyBackend),
-			}
-
-			unhealthyBackend, _ := url.ParseRequestURI(unavailableServer.URL)
-			unhealthyConnection := &connection{
-				backend:  unavailableServer.URL,
-				healthy:  false,
-				messages: make(chan message),
-				proxy:    httputil.NewSingleHostReverseProxy(unhealthyBackend),
-			}
-
 			config := &Config{
-				Backends: []string{},
+				Backends: []string{unavailableServer.URL, availableServer.URL},
 				NumConns: 10,
 			}
 			connectionPool := New(config)
-			connectionPool.connections <- unhealthyConnection
-			connectionPool.connections <- healthyConnection
 
 			defer connectionPool.Shutdown()
 
+			<-availableResChan
 			reader := strings.NewReader("This is a test")
-			request := httptest.NewRequest("GET", "http://www.test.com/hello", reader)
+			request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
 			recorder := httptest.NewRecorder()
+
+			wg.Add(1)
 			connectionPool.Fetch(recorder, request)
 
-			<-availableResChan
-
 			result, err := ioutil.ReadAll(recorder.Result().Body)
-
 			assertion.Equal(err, nil)
+
 			assertion.Equal(recorder.Code, http.StatusOK)
-			assertion.Equal(string(result), `{"state":"healthy","message":""}`)
+			assertion.Equal(string(result), `hello`)
 		})
 	})
 }
