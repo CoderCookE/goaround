@@ -54,4 +54,4 @@ services are assumed to have a `/health` endpoint, which will return a 200 respo
 healthy must return the body in the form `{"state": "healthy", "message": ""}`
 
 ## Included Packages:
-[https://github.com/dgraph-io/ristretto]([https://github.com/dgraph-io/ristretto)
+[https://github.com/dgraph-io/ristretto](https://github.com/dgraph-io/ristretto)
