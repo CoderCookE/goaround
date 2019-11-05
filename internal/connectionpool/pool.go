@@ -74,11 +74,9 @@ func New(c *Config) *pool {
 		cacheEnabled:    cacheEnabled,
 	}
 
-	poolConnections := make([]*connection, 0)
-
+	poolConnections := []*connection{}
 	for _, backend := range backends {
-		newConnection := connectionPool.addBackend(backend)
-		poolConnections = append(poolConnections, newConnection)
+		poolConnections = connectionPool.addBackend(poolConnections, backend)
 	}
 
 	shuffle(poolConnections, connectionPool.connections)
@@ -176,10 +174,9 @@ func (p *pool) ListenForBackendChanges() {
 			delete(p.healthChecks, removedBackend)
 		}
 
-		poolConnections := make([]*connection, 0)
+		poolConnections := []*connection{}
 		for _, addedBackend := range added {
-			newConnection := p.addBackend(addedBackend)
-			poolConnections = append(poolConnections, newConnection)
+			poolConnections = p.addBackend(poolConnections, addedBackend)
 		}
 
 		shuffle(poolConnections, p.connections)
@@ -212,7 +209,7 @@ func difference(original []string, updated []string) (added []string, removed []
 	return
 }
 
-func (p *pool) addBackend(backend string) (configuredConn *connection) {
+func (p *pool) addBackend(connections []*connection, backend string) []*connection {
 	url, err := url.ParseRequestURI(backend)
 	if err != nil {
 		log.Printf("error parsing backend url: %s", backend)
@@ -237,13 +234,14 @@ func (p *pool) addBackend(backend string) (configuredConn *connection) {
 			proxy.ModifyResponse = cacheResponse
 		}
 
-		configuredConn, err = newConnection(proxy, backend, p.cache)
+		configuredConn, err := newConnection(proxy, backend, p.cache)
 		if err != nil {
 			log.Printf("Error adding connection for: %s", backend)
 		} else {
 			backendConnections := make([]chan message, p.connsPerBackend)
 
 			for i := 0; i < p.connsPerBackend; i++ {
+				connections = append(connections, configuredConn)
 				backendConnections[i] = configuredConn.messages
 			}
 
@@ -259,5 +257,5 @@ func (p *pool) addBackend(backend string) (configuredConn *connection) {
 		}
 	}
 
-	return configuredConn
+	return connections
 }
