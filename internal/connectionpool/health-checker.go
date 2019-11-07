@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"sync"
 	"time"
 )
@@ -49,15 +50,13 @@ func (hc *healthChecker) Start() {
 	}
 }
 
-func (hc *healthChecker) Reuse(newBackend string) {
+func (hc *healthChecker) Reuse(newBackend string, proxy *httputil.ReverseProxy) *healthChecker {
 	hc.Lock()
 	hc.backend = newBackend
-	hc.notifySubscribers(true, hc.backend)
+	hc.notifySubscribers(false, hc.backend, proxy)
 	hc.Unlock()
-}
 
-func (hc *healthChecker) Remove() {
-
+	return hc
 }
 
 func (hc *healthChecker) check(ctx context.Context) {
@@ -88,13 +87,12 @@ func (hc *healthChecker) check(ctx context.Context) {
 
 	if healthy != hc.currentHealth {
 		hc.currentHealth = healthy
-		hc.notifySubscribers(healthy, hc.backend)
+		hc.notifySubscribers(healthy, hc.backend, nil)
 	}
 }
 
-func (hc *healthChecker) notifySubscribers(healthy bool, backend string) {
-	message := message{health: healthy, backend: backend}
-
+func (hc *healthChecker) notifySubscribers(healthy bool, backend string, proxy *httputil.ReverseProxy) {
+	message := message{health: healthy, backend: backend, proxy: proxy}
 	for _, c := range hc.subscribers {
 		c <- message
 	}

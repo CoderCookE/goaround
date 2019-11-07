@@ -156,15 +156,38 @@ func (p *pool) ListenForBackendChanges() {
 		}
 
 		added, removed := difference(currentBackends, updated)
-
 		for _, removedBackend := range removed {
 			if len(added) > 0 {
 				var new string
 				new, added = added[0], added[1:]
-				p.healthChecks[removedBackend].Reuse(new)
+				url, err := url.ParseRequestURI(new)
+				if err != nil {
+					log.Printf("Error adding backend, %s", new)
+				} else {
+					proxy := httputil.NewSingleHostReverseProxy(url)
+					proxy.Transport = p.client.Transport
 
+					if p.cacheEnabled {
+						cacheResponse := func(r *http.Response) error {
+							body, err := ioutil.ReadAll(r.Body)
+							cacheable := string(body)
+							r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+							path := r.Request.URL.Path
+							if err == nil {
+								p.cache.Set(path, cacheable, 1)
+							}
+
+							return nil
+						}
+						proxy.ModifyResponse = cacheResponse
+					}
+
+					newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
+					p.healthChecks[new] = newHC
+				}
 			} else {
-				p.healthChecks[removedBackend].Remove()
+				p.healthChecks[removedBackend].Shutdown()
 			}
 
 			delete(p.healthChecks, removedBackend)
@@ -177,6 +200,7 @@ func (p *pool) ListenForBackendChanges() {
 
 		shuffle(poolConnections, p.connections)
 	}
+
 }
 
 func difference(original []string, updated []string) (added []string, removed []string) {

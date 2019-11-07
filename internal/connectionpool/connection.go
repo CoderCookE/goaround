@@ -11,6 +11,7 @@ import (
 type message struct {
 	health  bool
 	backend string
+	proxy   *httputil.ReverseProxy
 }
 
 type connection struct {
@@ -38,6 +39,7 @@ func newConnection(proxy *httputil.ReverseProxy, backend string, cache *ristrett
 func (c *connection) get(w http.ResponseWriter, r *http.Request) error {
 	c.RLock()
 	defer c.RUnlock()
+
 	health := c.healthy
 	err := errors.New("Unhealthy Node")
 	if c.cache != nil {
@@ -61,11 +63,19 @@ func (c *connection) get(w http.ResponseWriter, r *http.Request) error {
 func (c *connection) healthCheck() {
 	for {
 		healthy := <-c.messages
+
+		c.Lock()
+
 		health := healthy.health
 		backend := healthy.backend
-		c.Lock()
 		c.healthy = health
-		c.backend = backend
+		proxy := healthy.proxy
+
+		if proxy != nil && c.backend != backend {
+			c.backend = backend
+			c.proxy = proxy
+		}
+
 		c.Unlock()
 	}
 }
