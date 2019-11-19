@@ -18,7 +18,6 @@ func TestFetch(t *testing.T) {
 	t.Run("With cache", func(t *testing.T) {
 		t.Run("Fetches from cache", func(t *testing.T) {
 			callCount := 0
-			availableResChan := make(chan bool, 1)
 			wg := &sync.WaitGroup{}
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var message []byte
@@ -26,8 +25,6 @@ func TestFetch(t *testing.T) {
 				if r.URL.Path == "/health" {
 					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
 					message, _ = json.Marshal(healthReponse)
-
-					availableResChan <- true
 				}
 
 				if r.URL.Path == "/foo" {
@@ -52,8 +49,10 @@ func TestFetch(t *testing.T) {
 			connectionPool := New(config)
 			defer connectionPool.Shutdown()
 
-			<-availableResChan
-			time.Sleep(200)
+			for connectionPool.healthChecks[availableServer.URL].currentHealth != true {
+				time.Sleep(200)
+			}
+
 			wg.Add(1)
 
 			for i := 0; i < 5; i++ {
@@ -76,7 +75,6 @@ func TestFetch(t *testing.T) {
 	t.Run("No cache", func(t *testing.T) {
 		t.Run("fetches each request from server", func(t *testing.T) {
 			callCount := 0
-			availableResChan := make(chan bool, 1)
 			wg := &sync.WaitGroup{}
 
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -85,8 +83,6 @@ func TestFetch(t *testing.T) {
 				if r.URL.Path == "/health" {
 					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
 					message, _ = json.Marshal(healthReponse)
-
-					availableResChan <- true
 				}
 
 				if r.URL.Path == "/foo" {
@@ -104,13 +100,15 @@ func TestFetch(t *testing.T) {
 			backends := []string{availableServer.URL}
 			config := &Config{
 				Backends: backends,
-				NumConns: 10,
+				NumConns: 1,
 			}
 
 			connectionPool := New(config)
 			defer connectionPool.Shutdown()
-			<-availableResChan
-			time.Sleep(200)
+
+			for connectionPool.healthChecks[availableServer.URL].currentHealth != true {
+				time.Sleep(200)
+			}
 
 			for i := 0; i < 5; i++ {
 				wg.Add(1)
@@ -132,7 +130,6 @@ func TestFetch(t *testing.T) {
 
 		t.Run("First connection tried is degraded, Uses next connections", func(t *testing.T) {
 			callCount := 0
-			availableResChan := make(chan bool, 1)
 			wg := &sync.WaitGroup{}
 
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -141,8 +138,6 @@ func TestFetch(t *testing.T) {
 				if r.URL.Path == "/health" {
 					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
 					message, _ = json.Marshal(healthReponse)
-
-					availableResChan <- true
 				}
 
 				if r.URL.Path == "/foo" {
@@ -172,8 +167,9 @@ func TestFetch(t *testing.T) {
 
 			defer connectionPool.Shutdown()
 
-			<-availableResChan
-			time.Sleep(200)
+			for connectionPool.healthChecks[availableServer.URL].currentHealth != true {
+				time.Sleep(200)
+			}
 
 			reader := strings.NewReader("This is a test")
 			request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
