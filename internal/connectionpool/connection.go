@@ -62,14 +62,13 @@ func (c *connection) get(w http.ResponseWriter, r *http.Request) error {
 
 func (c *connection) healthCheck() {
 	for {
-		healthy := <-c.messages
+		msg := <-c.messages
 
 		c.Lock()
 
-		health := healthy.health
-		backend := healthy.backend
-		c.healthy = health
-		proxy := healthy.proxy
+		backend := msg.backend
+		c.healthy = msg.health
+		proxy := msg.proxy
 
 		if proxy != nil && c.backend != backend {
 			c.backend = backend

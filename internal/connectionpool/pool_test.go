@@ -47,11 +47,10 @@ func TestFetch(t *testing.T) {
 			}
 
 			connectionPool := New(config)
-			defer connectionPool.Shutdown()
+			connectionPool.Shutdown()
 
-			for connectionPool.healthChecks[availableServer.URL].currentHealth != true {
-				time.Sleep(200)
-			}
+			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
+			time.Sleep(200)
 
 			wg.Add(1)
 
@@ -104,11 +103,10 @@ func TestFetch(t *testing.T) {
 			}
 
 			connectionPool := New(config)
-			defer connectionPool.Shutdown()
+			connectionPool.Shutdown()
 
-			for connectionPool.healthChecks[availableServer.URL].currentHealth != true {
-				time.Sleep(200)
-			}
+			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
+			time.Sleep(200)
 
 			for i := 0; i < 5; i++ {
 				wg.Add(1)
@@ -164,12 +162,10 @@ func TestFetch(t *testing.T) {
 				NumConns: 10,
 			}
 			connectionPool := New(config)
+			connectionPool.Shutdown()
 
-			defer connectionPool.Shutdown()
-
-			for connectionPool.healthChecks[availableServer.URL].currentHealth != true {
-				time.Sleep(200)
-			}
+			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
+			time.Sleep(200)
 
 			reader := strings.NewReader("This is a test")
 			request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
