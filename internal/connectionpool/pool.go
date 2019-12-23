@@ -109,15 +109,19 @@ func buildCache() (*ristretto.Cache, error) {
 //Exported method for passing a request to a connection from the pool
 //Returns a 503 status code if request is unsuccessful
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
-	connection := <-p.connections
-	defer func() {
-		p.connections <- connection
-	}()
+	select {
+	case connection := <-p.connections:
+		defer func() {
+			p.connections <- connection
+		}()
 
-	err := connection.get(w, r)
-	if err != nil {
-		log.Printf("retrying err with request: %s", err.Error())
-		p.Fetch(w, r)
+		err := connection.get(w, r)
+		if err != nil {
+			log.Printf("retrying err with request: %s", err.Error())
+			p.Fetch(w, r)
+		}
+	default:
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 }
 
