@@ -151,60 +151,63 @@ func (p *pool) ListenForBackendChanges() {
 		}
 
 		scanner := bufio.NewScanner(conn)
-		scanner.Scan()
-		updated := strings.Split(scanner.Text(), ",")
+		for scanner.Scan() {
+			updated := strings.Split(scanner.Text(), ",")
 
-		var currentBackends []string
-		for k := range p.healthChecks {
-			currentBackends = append(currentBackends, k)
-		}
-
-		added, removed := difference(currentBackends, updated)
-		for _, removedBackend := range removed {
-			if len(added) > 0 {
-				var new string
-				new, added = added[0], added[1:]
-				url, err := url.ParseRequestURI(new)
-				if err != nil {
-					log.Printf("Error adding backend, %s", new)
-				} else {
-					proxy := httputil.NewSingleHostReverseProxy(url)
-					proxy.Transport = p.client.Transport
-
-					if p.cacheEnabled {
-						cacheResponse := func(r *http.Response) error {
-							body, err := ioutil.ReadAll(r.Body)
-							cacheable := string(body)
-							r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-
-							path := r.Request.URL.Path
-							if err == nil {
-								p.cache.Set(path, cacheable, 1)
-							}
-
-							return nil
-						}
-						proxy.ModifyResponse = cacheResponse
-					}
-
-					newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
-					p.healthChecks[new] = newHC
-				}
-			} else {
-				p.healthChecks[removedBackend].Shutdown()
+			var currentBackends []string
+			for k := range p.healthChecks {
+				currentBackends = append(currentBackends, k)
 			}
 
-			delete(p.healthChecks, removedBackend)
-		}
+			added, removed := difference(currentBackends, updated)
+			log.Printf("Adding: %s", added)
+			log.Printf("Removing: %s", removed)
 
-		poolConnections := []*connection{}
-		for _, addedBackend := range added {
-			poolConnections = p.addBackend(poolConnections, addedBackend)
-		}
+			for _, removedBackend := range removed {
+				if len(added) > 0 {
+					var new string
+					new, added = added[0], added[1:]
+					url, err := url.ParseRequestURI(new)
+					if err != nil {
+						log.Printf("Error adding backend, %s", new)
+					} else {
+						proxy := httputil.NewSingleHostReverseProxy(url)
+						proxy.Transport = p.client.Transport
 
-		shuffle(poolConnections, p.connections)
+						if p.cacheEnabled {
+							cacheResponse := func(r *http.Response) error {
+								body, err := ioutil.ReadAll(r.Body)
+								cacheable := string(body)
+								r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+								path := r.Request.URL.Path
+								if err == nil {
+									p.cache.Set(path, cacheable, 1)
+								}
+
+								return nil
+							}
+							proxy.ModifyResponse = cacheResponse
+						}
+
+						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
+						p.healthChecks[new] = newHC
+					}
+				} else {
+					p.healthChecks[removedBackend].Shutdown()
+				}
+
+				delete(p.healthChecks, removedBackend)
+			}
+
+			poolConnections := []*connection{}
+			for _, addedBackend := range added {
+				poolConnections = p.addBackend(poolConnections, addedBackend)
+			}
+
+			shuffle(poolConnections, p.connections)
+		}
 	}
-
 }
 
 func difference(original []string, updated []string) (added []string, removed []string) {
