@@ -55,7 +55,6 @@ func TestFetch(t *testing.T) {
 			time.Sleep(200)
 
 			wg.Add(1)
-
 			for i := 0; i < 5; i++ {
 				reader := strings.NewReader("This is a test")
 				request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
