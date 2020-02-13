@@ -3,7 +3,7 @@
 # GoAround
 A simple HTTP load balancer that
 is capable of managing multiple server instances in a pool and balancing the
-incoming requests across those instances. If no backend instances are avaible
+incoming requests across those instances. If no backend instances are available
 a 503 error will be returned.
 
 ## Make file
@@ -46,7 +46,7 @@ echo "http:/?localhost:3000,http://localhost:3001" | nc -U /tmp/goaround.sock
 ```
 The backends previously configured will be removed and replaced with only the ones passed in the updated list.
 
-## Detailed Implemnation
+## Detailed Implementation
 This service starts a web server on a user defined port, passed via `-p` flag,
 if no flag is passed the service will default to port 3000.
 
