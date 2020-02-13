@@ -7,6 +7,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"sync"
 	"time"
 )
 
@@ -16,7 +18,8 @@ type healthCheckReponse struct {
 }
 
 type healthChecker struct {
-	subscribers   []chan bool
+	sync.Mutex
+	subscribers   []chan message
 	currentHealth bool
 	client        *http.Client
 	backend       string
@@ -27,14 +30,19 @@ func (hc *healthChecker) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	hc.Lock()
 	hc.check(ctx)
+	hc.Unlock()
+
 	ticker := time.NewTicker(1000 * time.Millisecond)
 	for {
 		select {
 		case <-ticker.C:
 			cancel()
+			hc.Lock()
 			ctx, cancel = context.WithCancel(context.Background())
 			hc.check(ctx)
+			hc.Unlock()
 		case <-hc.done:
 			ticker.Stop()
 			return
@@ -42,12 +50,24 @@ func (hc *healthChecker) Start() {
 	}
 }
 
+func (hc *healthChecker) Reuse(newBackend string, proxy *httputil.ReverseProxy) *healthChecker {
+	hc.Lock()
+	hc.backend = newBackend
+	hc.notifySubscribers(false, hc.backend, proxy)
+	hc.Unlock()
+
+	return hc
+}
+
 func (hc *healthChecker) check(ctx context.Context) {
 	url := fmt.Sprintf("%s%s", hc.backend, "/health")
 	healthy := hc.currentHealth
 
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		log.Printf("Error creating request: %s, error %s", hc.backend, err.Error())
+		healthy = false
+	} else if resp, err := http.DefaultClient.Do(req.WithContext(ctx)); err != nil {
 		log.Printf("Error with health check, backend: %s, error %s", hc.backend, err.Error())
 		healthy = false
 	} else {
@@ -67,9 +87,14 @@ func (hc *healthChecker) check(ctx context.Context) {
 
 	if healthy != hc.currentHealth {
 		hc.currentHealth = healthy
-		for _, c := range hc.subscribers {
-			c <- healthy
-		}
+		hc.notifySubscribers(healthy, hc.backend, nil)
+	}
+}
+
+func (hc *healthChecker) notifySubscribers(healthy bool, backend string, proxy *httputil.ReverseProxy) {
+	message := message{health: healthy, backend: backend, proxy: proxy}
+	for _, c := range hc.subscribers {
+		c <- message
 	}
 }
 

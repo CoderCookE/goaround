@@ -39,7 +39,7 @@ func TestHealthCheck(t *testing.T) {
 		assertion.Equal(err, nil)
 
 		assertion.False(conn.healthy)
-		conn.messages <- true
+		conn.messages <- message{health: true}
 		time.Sleep(200 * time.Millisecond)
 
 		conn.Lock()
@@ -47,7 +47,7 @@ func TestHealthCheck(t *testing.T) {
 		conn.Unlock()
 		assertion.True(health)
 
-		conn.messages <- false
+		conn.messages <- message{health: false}
 		time.Sleep(200 * time.Millisecond)
 
 		conn.Lock()

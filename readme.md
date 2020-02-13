@@ -38,6 +38,14 @@ sudo ./bin/goaround -p 443 -b http://127.0.0.1:2702 -cacert /Users/ecook/cacert.
 -privkey location of private key
 ```
 
+## Updating backends via unix socket
+Pass a comma separated list of all backends;
+```
+echo "http:/?localhost:3000,http://localhost:3001" | nc -U /tmp/goaround.sock
+
+```
+The backends previously configured will be removed and replaced with only the ones passed in the updated list.
+
 ## Detailed Implemnation
 This service starts a web server on a user defined port, passed via `-p` flag,
 if no flag is passed the service will default to port 3000.

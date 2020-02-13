@@ -8,9 +8,15 @@ import (
 	"sync"
 )
 
+type message struct {
+	health  bool
+	backend string
+	proxy   *httputil.ReverseProxy
+}
+
 type connection struct {
 	healthy  bool
-	messages chan bool
+	messages chan message
 	backend  string
 	sync.RWMutex
 	proxy *httputil.ReverseProxy
@@ -20,7 +26,7 @@ type connection struct {
 func newConnection(proxy *httputil.ReverseProxy, backend string, cache *ristretto.Cache) (*connection, error) {
 	conn := &connection{
 		backend:  backend,
-		messages: make(chan bool),
+		messages: make(chan message),
 		proxy:    proxy,
 		cache:    cache,
 	}
@@ -56,9 +62,19 @@ func (c *connection) get(w http.ResponseWriter, r *http.Request) error {
 
 func (c *connection) healthCheck() {
 	for {
-		healthy := <-c.messages
+		msg := <-c.messages
+
 		c.Lock()
-		c.healthy = healthy
+
+		backend := msg.backend
+		c.healthy = msg.health
+		proxy := msg.proxy
+
+		if proxy != nil && c.backend != backend {
+			c.backend = backend
+			c.proxy = proxy
+		}
+
 		c.Unlock()
 	}
 }
