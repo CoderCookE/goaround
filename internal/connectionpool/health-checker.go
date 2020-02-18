@@ -24,11 +24,24 @@ type healthChecker struct {
 	client        *http.Client
 	backend       string
 	done          chan bool
+	wg            *sync.WaitGroup
 }
 
-func (hc *healthChecker) Start() {
+func NewHealthChecker(client *http.Client, subscribers []chan message, backend string, currentHealth bool) *healthChecker {
+	return &healthChecker{
+		client:        client,
+		subscribers:   subscribers,
+		backend:       backend,
+		done:          make(chan bool),
+		currentHealth: currentHealth,
+		wg:            &sync.WaitGroup{},
+	}
+}
+
+func (hc *healthChecker) Start(startup *sync.WaitGroup) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	startup.Done()
 
 	hc.Lock()
 	hc.check(ctx)
@@ -92,10 +105,14 @@ func (hc *healthChecker) check(ctx context.Context) {
 }
 
 func (hc *healthChecker) notifySubscribers(healthy bool, backend string, proxy *httputil.ReverseProxy) {
-	message := message{health: healthy, backend: backend, proxy: proxy}
+	message := message{health: healthy, backend: backend, proxy: proxy, ack: hc.wg}
+
+	hc.wg.Add(len(hc.subscribers))
 	for _, c := range hc.subscribers {
 		c <- message
 	}
+
+	hc.wg.Wait()
 }
 
 func (hc *healthChecker) Shutdown() {

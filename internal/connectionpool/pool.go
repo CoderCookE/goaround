@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -75,12 +76,18 @@ func New(c *Config) *pool {
 	}
 
 	poolConnections := []*connection{}
+
+	startup := &sync.WaitGroup{}
 	for _, backend := range backends {
-		poolConnections = connectionPool.addBackend(poolConnections, backend)
+		startup.Add(1)
+		poolConnections = connectionPool.addBackend(poolConnections, backend, startup)
 	}
 
 	shuffle(poolConnections, connectionPool.connections)
-	go connectionPool.ListenForBackendChanges()
+
+	startup.Add(1)
+	go connectionPool.ListenForBackendChanges(startup)
+	startup.Wait()
 
 	return connectionPool
 }
@@ -131,7 +138,7 @@ func (p *pool) Shutdown() {
 	}
 }
 
-func (p *pool) ListenForBackendChanges() {
+func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 	const SockAddr = "/tmp/goaround.sock"
 
 	if err := os.RemoveAll(SockAddr); err != nil {
@@ -143,6 +150,8 @@ func (p *pool) ListenForBackendChanges() {
 		log.Fatal("listen error:", err)
 	}
 	defer l.Close()
+
+	startup.Done()
 
 	for {
 		conn, err := l.Accept()
@@ -202,7 +211,8 @@ func (p *pool) ListenForBackendChanges() {
 
 			poolConnections := []*connection{}
 			for _, addedBackend := range added {
-				poolConnections = p.addBackend(poolConnections, addedBackend)
+				startup.Add(1)
+				poolConnections = p.addBackend(poolConnections, addedBackend, startup)
 			}
 
 			shuffle(poolConnections, p.connections)
@@ -236,7 +246,7 @@ func difference(original []string, updated []string) (added []string, removed []
 	return
 }
 
-func (p *pool) addBackend(connections []*connection, backend string) []*connection {
+func (p *pool) addBackend(connections []*connection, backend string, startup *sync.WaitGroup) []*connection {
 	url, err := url.ParseRequestURI(backend)
 	if err != nil {
 		log.Printf("error parsing backend url: %s", backend)
@@ -272,15 +282,15 @@ func (p *pool) addBackend(connections []*connection, backend string) []*connecti
 				backendConnections[i] = configuredConn.messages
 			}
 
-			hc := &healthChecker{
-				client:      p.client,
-				subscribers: backendConnections,
-				backend:     configuredConn.backend,
-				done:        make(chan bool, 1),
-			}
+			hc := NewHealthChecker(
+				p.client,
+				backendConnections,
+				configuredConn.backend,
+				false,
+			)
 
 			p.healthChecks[backend] = hc
-			go hc.Start()
+			go hc.Start(startup)
 		}
 	}
 

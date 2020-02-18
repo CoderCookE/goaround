@@ -2,6 +2,7 @@ package assert
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -11,6 +12,11 @@ type Asserter struct {
 
 func (a *Asserter) Equal(actual, expected interface{}) {
 	a.T.Helper()
+
+	if actual != nil && reflect.TypeOf(actual).String() == "error" {
+		a.T.Fatal(actual.(error).Error())
+		return
+	}
 
 	if expected != actual {
 		message := fmt.Sprintf("expected: %s did not equal actual: %s", expected, actual)

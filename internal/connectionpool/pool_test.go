@@ -49,10 +49,7 @@ func TestFetch(t *testing.T) {
 			}
 
 			connectionPool := New(config)
-			connectionPool.Shutdown()
-
 			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
-			time.Sleep(200)
 
 			wg.Add(1)
 			for i := 0; i < 5; i++ {
@@ -104,10 +101,7 @@ func TestFetch(t *testing.T) {
 			}
 
 			connectionPool := New(config)
-			connectionPool.Shutdown()
-
 			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
-			time.Sleep(200)
 
 			for i := 0; i < 5; i++ {
 				wg.Add(1)
@@ -163,10 +157,8 @@ func TestFetch(t *testing.T) {
 				NumConns: 10,
 			}
 			connectionPool := New(config)
-			connectionPool.Shutdown()
 
 			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
-			time.Sleep(200)
 
 			reader := strings.NewReader("This is a test")
 			request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
@@ -185,7 +177,6 @@ func TestFetch(t *testing.T) {
 
 	t.Run("Listens on unix socket for updates to backends", func(t *testing.T) {
 		callCount := 0
-		blocker := make(chan bool)
 		wg := &sync.WaitGroup{}
 
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,10 +193,6 @@ func TestFetch(t *testing.T) {
 			}
 
 			w.Write(message)
-			go func() {
-				time.Sleep(1 * time.Second)
-				blocker <- true
-			}()
 		})
 
 		availableServer := httptest.NewServer(availableHandler)
@@ -215,18 +202,25 @@ func TestFetch(t *testing.T) {
 			Backends: []string{},
 			NumConns: 10,
 		}
+
 		connectionPool := New(config)
-		time.Sleep(1 * time.Second)
 
 		const SockAddr = "/tmp/goaround.sock"
 		c, err := net.Dial("unix", SockAddr)
 		assertion.Equal(err, nil)
-
 		defer c.Close()
+
 		post := fmt.Sprintf("%s\n", availableServer.URL)
 		_, err = c.Write([]byte(post))
 		assertion.Equal(err, nil)
-		<-blocker
+
+		hc := connectionPool.healthChecks[availableServer.URL]
+		for hc == nil {
+			time.Sleep(1 * time.Second)
+			hc = connectionPool.healthChecks[availableServer.URL]
+		}
+
+		hc.wg.Wait()
 
 		reader := strings.NewReader("This is a test")
 		request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)

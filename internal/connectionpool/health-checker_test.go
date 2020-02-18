@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,19 +32,20 @@ func TestHealthChecker(t *testing.T) {
 		availableServer := httptest.NewServer(availableHandler)
 		defer availableServer.Close()
 
-		hc := healthChecker{
-			client:        client,
-			subscribers:   []chan message{resChan},
-			backend:       availableServer.URL,
-			done:          make(chan bool),
-			currentHealth: false,
-		}
+		hc := NewHealthChecker(
+			client,
+			[]chan message{resChan},
+			availableServer.URL,
+			false,
+		)
 
-		go hc.Start()
+		startup := &sync.WaitGroup{}
+		startup.Add(1)
+		go hc.Start(startup)
+		startup.Wait()
 		defer hc.Shutdown()
 
 		health := <-resChan
-
 		assertion.True(health.health)
 	})
 
@@ -59,19 +61,21 @@ func TestHealthChecker(t *testing.T) {
 		degradedServer := httptest.NewServer(degradedHandler)
 		defer degradedServer.Close()
 
-		hc := healthChecker{
-			client:        client,
-			subscribers:   []chan message{resChan},
-			backend:       degradedServer.URL,
-			done:          make(chan bool),
-			currentHealth: true,
-		}
+		hc := NewHealthChecker(
+			client,
+			[]chan message{resChan},
+			degradedServer.URL,
+			true,
+		)
 
-		go hc.Start()
+		startup := &sync.WaitGroup{}
+		startup.Add(1)
+		go hc.Start(startup)
+		startup.Wait()
+
 		defer hc.Shutdown()
 
 		health := <-resChan
-
 		assertion.False(health.health)
 	})
 }

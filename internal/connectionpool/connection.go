@@ -12,6 +12,7 @@ type message struct {
 	health  bool
 	backend string
 	proxy   *httputil.ReverseProxy
+	ack     *sync.WaitGroup
 }
 
 type connection struct {
@@ -62,19 +63,25 @@ func (c *connection) get(w http.ResponseWriter, r *http.Request) error {
 
 func (c *connection) healthCheck() {
 	for {
-		msg := <-c.messages
+		select {
+		case msg := <-c.messages:
+			c.Lock()
 
-		c.Lock()
+			backend := msg.backend
+			c.healthy = msg.health
+			proxy := msg.proxy
 
-		backend := msg.backend
-		c.healthy = msg.health
-		proxy := msg.proxy
+			if proxy != nil && c.backend != backend {
+				c.backend = backend
+				c.proxy = proxy
+			}
 
-		if proxy != nil && c.backend != backend {
-			c.backend = backend
-			c.proxy = proxy
+			msg.ack.Done()
+			c.Unlock()
 		}
-
-		c.Unlock()
 	}
+}
+
+func (c *connection) Shutdown() {
+	close(c.messages)
 }
