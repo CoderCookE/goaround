@@ -41,7 +41,7 @@ sudo ./bin/goaround -p 443 -b http://127.0.0.1:2702 -cacert /Users/ecook/cacert.
 ## Updating backends via unix socket
 Pass a comma separated list of all backends;
 ```
-echo "http:/?localhost:3000,http://localhost:3001" | nc -U /tmp/goaround.sock
+echo "http://localhost:3000,http://localhost:3001" | nc -U /tmp/goaround.sock
 
 ```
 The backends previously configured will be removed and replaced with only the ones passed in the updated list.
