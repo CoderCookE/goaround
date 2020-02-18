@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-func TestHealthCheck(t *testing.T) {
+func TestConnection(t *testing.T) {
 	tr := &http.Transport{
 		MaxIdleConns:    10,
 		IdleConnTimeout: 1 * time.Second,
@@ -19,7 +20,9 @@ func TestHealthCheck(t *testing.T) {
 
 	assertion := &assert.Asserter{T: t}
 
-	t.Run("backend returns a healthy state", func(t *testing.T) {
+	t.Run("when in a healthy state", func(t *testing.T) {
+		wg := &sync.WaitGroup{}
+
 		backend := "http://www.google.com/"
 
 		cache, err := ristretto.NewCache(&ristretto.Config{
@@ -35,20 +38,24 @@ func TestHealthCheck(t *testing.T) {
 		proxy := httputil.NewSingleHostReverseProxy(url)
 		proxy.Transport = tr
 
-		conn, err := newConnection(proxy, backend, cache)
+		wg.Add(1)
+		conn, err := newConnection(proxy, backend, cache, wg)
 		assertion.Equal(err, nil)
 
 		assertion.False(conn.healthy)
-		conn.messages <- message{health: true}
-		time.Sleep(200 * time.Millisecond)
+
+		wg.Add(1)
+		conn.messages <- message{health: true, ack: wg}
+		wg.Wait()
 
 		conn.Lock()
 		health := conn.healthy
 		conn.Unlock()
 		assertion.True(health)
 
-		conn.messages <- message{health: false}
-		time.Sleep(200 * time.Millisecond)
+		wg.Add(1)
+		conn.messages <- message{health: false, ack: wg}
+		wg.Wait()
 
 		conn.Lock()
 		health = conn.healthy

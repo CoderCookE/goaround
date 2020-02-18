@@ -49,10 +49,7 @@ func TestFetch(t *testing.T) {
 			}
 
 			connectionPool := New(config)
-			connectionPool.Shutdown()
-
 			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
-			time.Sleep(200)
 
 			wg.Add(1)
 			for i := 0; i < 5; i++ {
@@ -104,10 +101,10 @@ func TestFetch(t *testing.T) {
 			}
 
 			connectionPool := New(config)
-			connectionPool.Shutdown()
 
+			connectionPool.RLock()
 			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
-			time.Sleep(200)
+			connectionPool.RUnlock()
 
 			for i := 0; i < 5; i++ {
 				wg.Add(1)
@@ -163,10 +160,8 @@ func TestFetch(t *testing.T) {
 				NumConns: 10,
 			}
 			connectionPool := New(config)
-			connectionPool.Shutdown()
 
 			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
-			time.Sleep(200)
 
 			reader := strings.NewReader("This is a test")
 			request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
@@ -185,8 +180,8 @@ func TestFetch(t *testing.T) {
 
 	t.Run("Listens on unix socket for updates to backends", func(t *testing.T) {
 		callCount := 0
-		blocker := make(chan bool)
 		wg := &sync.WaitGroup{}
+		blocker := make(chan bool)
 
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var message []byte
@@ -215,23 +210,38 @@ func TestFetch(t *testing.T) {
 			Backends: []string{},
 			NumConns: 10,
 		}
+
 		connectionPool := New(config)
 		time.Sleep(1 * time.Second)
 
 		const SockAddr = "/tmp/goaround.sock"
 		c, err := net.Dial("unix", SockAddr)
 		assertion.Equal(err, nil)
-
 		defer c.Close()
+
 		post := fmt.Sprintf("%s\n", availableServer.URL)
 		_, err = c.Write([]byte(post))
 		assertion.Equal(err, nil)
-		<-blocker
+
+		connectionPool.RLock()
+		hc := connectionPool.healthChecks[availableServer.URL]
+		connectionPool.RUnlock()
+
+		for hc == nil {
+			time.Sleep(1 * time.Second)
+
+			connectionPool.RLock()
+			hc = connectionPool.healthChecks[availableServer.URL]
+			connectionPool.RUnlock()
+		}
+
+		hc.wg.Wait()
 
 		reader := strings.NewReader("This is a test")
 		request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
 		recorder := httptest.NewRecorder()
 
+		<-blocker
 		wg.Add(1)
 		connectionPool.Fetch(recorder, request)
 		wg.Wait()

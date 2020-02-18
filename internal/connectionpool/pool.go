@@ -14,10 +14,12 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
 type pool struct {
+	sync.RWMutex
 	connections     chan *connection
 	healthChecks    map[string]*healthChecker
 	client          *http.Client
@@ -75,12 +77,17 @@ func New(c *Config) *pool {
 	}
 
 	poolConnections := []*connection{}
+
+	startup := &sync.WaitGroup{}
 	for _, backend := range backends {
-		poolConnections = connectionPool.addBackend(poolConnections, backend)
+		startup.Add(1)
+		poolConnections = connectionPool.addBackend(poolConnections, backend, startup)
 	}
 
 	shuffle(poolConnections, connectionPool.connections)
-	go connectionPool.ListenForBackendChanges()
+
+	go connectionPool.ListenForBackendChanges(startup)
+	startup.Wait()
 
 	return connectionPool
 }
@@ -126,12 +133,14 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *pool) Shutdown() {
+	p.RLock()
 	for _, hc := range p.healthChecks {
 		hc.Shutdown()
 	}
+	p.RUnlock()
 }
 
-func (p *pool) ListenForBackendChanges() {
+func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 	const SockAddr = "/tmp/goaround.sock"
 
 	if err := os.RemoveAll(SockAddr); err != nil {
@@ -155,9 +164,11 @@ func (p *pool) ListenForBackendChanges() {
 			updated := strings.Split(scanner.Text(), ",")
 
 			var currentBackends []string
+			p.RLock()
 			for k := range p.healthChecks {
 				currentBackends = append(currentBackends, k)
 			}
+			p.RUnlock()
 
 			added, removed := difference(currentBackends, updated)
 			log.Printf("Adding: %s", added)
@@ -190,19 +201,26 @@ func (p *pool) ListenForBackendChanges() {
 							proxy.ModifyResponse = cacheResponse
 						}
 
+						p.Lock()
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
 						p.healthChecks[new] = newHC
+						p.Unlock()
 					}
 				} else {
+					p.Lock()
 					p.healthChecks[removedBackend].Shutdown()
+					p.Unlock()
 				}
 
+				p.Lock()
 				delete(p.healthChecks, removedBackend)
+				p.Unlock()
 			}
 
 			poolConnections := []*connection{}
 			for _, addedBackend := range added {
-				poolConnections = p.addBackend(poolConnections, addedBackend)
+				startup.Add(1)
+				poolConnections = p.addBackend(poolConnections, addedBackend, startup)
 			}
 
 			shuffle(poolConnections, p.connections)
@@ -236,7 +254,7 @@ func difference(original []string, updated []string) (added []string, removed []
 	return
 }
 
-func (p *pool) addBackend(connections []*connection, backend string) []*connection {
+func (p *pool) addBackend(connections []*connection, backend string, startup *sync.WaitGroup) []*connection {
 	url, err := url.ParseRequestURI(backend)
 	if err != nil {
 		log.Printf("error parsing backend url: %s", backend)
@@ -261,7 +279,8 @@ func (p *pool) addBackend(connections []*connection, backend string) []*connecti
 			proxy.ModifyResponse = cacheResponse
 		}
 
-		configuredConn, err := newConnection(proxy, backend, p.cache)
+		startup.Add(1)
+		configuredConn, err := newConnection(proxy, backend, p.cache, startup)
 		if err != nil {
 			log.Printf("Error adding connection for: %s", backend)
 		} else {
@@ -272,15 +291,18 @@ func (p *pool) addBackend(connections []*connection, backend string) []*connecti
 				backendConnections[i] = configuredConn.messages
 			}
 
-			hc := &healthChecker{
-				client:      p.client,
-				subscribers: backendConnections,
-				backend:     configuredConn.backend,
-				done:        make(chan bool, 1),
-			}
+			hc := NewHealthChecker(
+				p.client,
+				backendConnections,
+				configuredConn.backend,
+				false,
+			)
 
+			p.Lock()
 			p.healthChecks[backend] = hc
-			go hc.Start()
+			p.Unlock()
+
+			go hc.Start(startup)
 		}
 	}
 
