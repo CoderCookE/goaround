@@ -12,7 +12,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-func TestHealthCheck(t *testing.T) {
+func TestConnection(t *testing.T) {
 	tr := &http.Transport{
 		MaxIdleConns:    10,
 		IdleConnTimeout: 1 * time.Second,
@@ -38,7 +38,8 @@ func TestHealthCheck(t *testing.T) {
 		proxy := httputil.NewSingleHostReverseProxy(url)
 		proxy.Transport = tr
 
-		conn, err := newConnection(proxy, backend, cache)
+		wg.Add(1)
+		conn, err := newConnection(proxy, backend, cache, wg)
 		assertion.Equal(err, nil)
 
 		assertion.False(conn.healthy)

@@ -24,7 +24,7 @@ type connection struct {
 	cache *ristretto.Cache
 }
 
-func newConnection(proxy *httputil.ReverseProxy, backend string, cache *ristretto.Cache) (*connection, error) {
+func newConnection(proxy *httputil.ReverseProxy, backend string, cache *ristretto.Cache, startup *sync.WaitGroup) (*connection, error) {
 	conn := &connection{
 		backend:  backend,
 		messages: make(chan message),
@@ -33,6 +33,7 @@ func newConnection(proxy *httputil.ReverseProxy, backend string, cache *ristrett
 	}
 
 	go conn.healthCheck()
+	startup.Done()
 
 	return conn, nil
 }
@@ -66,7 +67,6 @@ func (c *connection) healthCheck() {
 		select {
 		case msg := <-c.messages:
 			c.Lock()
-
 			backend := msg.backend
 			c.healthy = msg.health
 			proxy := msg.proxy

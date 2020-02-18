@@ -101,7 +101,10 @@ func TestFetch(t *testing.T) {
 			}
 
 			connectionPool := New(config)
+
+			connectionPool.RLock()
 			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
+			connectionPool.RUnlock()
 
 			for i := 0; i < 5; i++ {
 				wg.Add(1)
@@ -178,6 +181,7 @@ func TestFetch(t *testing.T) {
 	t.Run("Listens on unix socket for updates to backends", func(t *testing.T) {
 		callCount := 0
 		wg := &sync.WaitGroup{}
+		blocker := make(chan bool)
 
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var message []byte
@@ -193,6 +197,10 @@ func TestFetch(t *testing.T) {
 			}
 
 			w.Write(message)
+			go func() {
+				time.Sleep(1 * time.Second)
+				blocker <- true
+			}()
 		})
 
 		availableServer := httptest.NewServer(availableHandler)
@@ -204,6 +212,7 @@ func TestFetch(t *testing.T) {
 		}
 
 		connectionPool := New(config)
+		time.Sleep(1 * time.Second)
 
 		const SockAddr = "/tmp/goaround.sock"
 		c, err := net.Dial("unix", SockAddr)
@@ -214,10 +223,16 @@ func TestFetch(t *testing.T) {
 		_, err = c.Write([]byte(post))
 		assertion.Equal(err, nil)
 
+		connectionPool.RLock()
 		hc := connectionPool.healthChecks[availableServer.URL]
+		connectionPool.RUnlock()
+
 		for hc == nil {
 			time.Sleep(1 * time.Second)
+
+			connectionPool.RLock()
 			hc = connectionPool.healthChecks[availableServer.URL]
+			connectionPool.RUnlock()
 		}
 
 		hc.wg.Wait()
@@ -226,6 +241,7 @@ func TestFetch(t *testing.T) {
 		request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
 		recorder := httptest.NewRecorder()
 
+		<-blocker
 		wg.Add(1)
 		connectionPool.Fetch(recorder, request)
 		wg.Wait()

@@ -19,6 +19,7 @@ import (
 )
 
 type pool struct {
+	sync.RWMutex
 	connections     chan *connection
 	healthChecks    map[string]*healthChecker
 	client          *http.Client
@@ -85,7 +86,6 @@ func New(c *Config) *pool {
 
 	shuffle(poolConnections, connectionPool.connections)
 
-	startup.Add(1)
 	go connectionPool.ListenForBackendChanges(startup)
 	startup.Wait()
 
@@ -133,9 +133,11 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *pool) Shutdown() {
+	p.RLock()
 	for _, hc := range p.healthChecks {
 		hc.Shutdown()
 	}
+	p.RUnlock()
 }
 
 func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
@@ -151,8 +153,6 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 	}
 	defer l.Close()
 
-	startup.Done()
-
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -164,9 +164,11 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 			updated := strings.Split(scanner.Text(), ",")
 
 			var currentBackends []string
+			p.RLock()
 			for k := range p.healthChecks {
 				currentBackends = append(currentBackends, k)
 			}
+			p.RUnlock()
 
 			added, removed := difference(currentBackends, updated)
 			log.Printf("Adding: %s", added)
@@ -199,14 +201,20 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 							proxy.ModifyResponse = cacheResponse
 						}
 
+						p.Lock()
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
 						p.healthChecks[new] = newHC
+						p.Unlock()
 					}
 				} else {
+					p.Lock()
 					p.healthChecks[removedBackend].Shutdown()
+					p.Unlock()
 				}
 
+				p.Lock()
 				delete(p.healthChecks, removedBackend)
+				p.Unlock()
 			}
 
 			poolConnections := []*connection{}
@@ -271,7 +279,8 @@ func (p *pool) addBackend(connections []*connection, backend string, startup *sy
 			proxy.ModifyResponse = cacheResponse
 		}
 
-		configuredConn, err := newConnection(proxy, backend, p.cache)
+		startup.Add(1)
+		configuredConn, err := newConnection(proxy, backend, p.cache, startup)
 		if err != nil {
 			log.Printf("Error adding connection for: %s", backend)
 		} else {
@@ -289,7 +298,10 @@ func (p *pool) addBackend(connections []*connection, backend string, startup *sy
 				false,
 			)
 
+			p.Lock()
 			p.healthChecks[backend] = hc
+			p.Unlock()
+
 			go hc.Start(startup)
 		}
 	}
