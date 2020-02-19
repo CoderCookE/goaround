@@ -1,4 +1,4 @@
-package connectionpool
+package pool
 
 import (
 	"encoding/json"
@@ -13,7 +13,25 @@ import (
 	"time"
 
 	"github.com/CoderCookE/goaround/internal/assert"
+	"github.com/CoderCookE/goaround/internal/healthcheck"
 )
+
+func waitForHealthCheck(connectionPool *pool, server string) {
+	connectionPool.RLock()
+	hc := connectionPool.healthChecks[server]
+	connectionPool.RUnlock()
+
+	for hc == nil {
+		time.Sleep(1 * time.Second)
+
+		connectionPool.RLock()
+		hc = connectionPool.healthChecks[server]
+		connectionPool.RUnlock()
+	}
+
+	hc.Wg.Wait()
+	return
+}
 
 func TestFetch(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
@@ -21,11 +39,13 @@ func TestFetch(t *testing.T) {
 		t.Run("Fetches from cache", func(t *testing.T) {
 			callCount := 0
 			wg := &sync.WaitGroup{}
+			blocker := make(chan bool)
+
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var message []byte
 
 				if r.URL.Path == "/health" {
-					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+					healthReponse := &healthcheck.Reponse{State: "healthy", Message: ""}
 					message, _ = json.Marshal(healthReponse)
 				}
 
@@ -36,6 +56,10 @@ func TestFetch(t *testing.T) {
 				}
 
 				w.Write(message)
+				go func() {
+					time.Sleep(1 * time.Second)
+					blocker <- true
+				}()
 			})
 
 			availableServer := httptest.NewServer(availableHandler)
@@ -49,8 +73,8 @@ func TestFetch(t *testing.T) {
 			}
 
 			connectionPool := New(config)
-			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
 
+			<-blocker
 			wg.Add(1)
 			for i := 0; i < 5; i++ {
 				reader := strings.NewReader("This is a test")
@@ -73,12 +97,13 @@ func TestFetch(t *testing.T) {
 		t.Run("fetches each request from server", func(t *testing.T) {
 			callCount := 0
 			wg := &sync.WaitGroup{}
+			blocker := make(chan bool)
 
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var message []byte
 
 				if r.URL.Path == "/health" {
-					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+					healthReponse := &healthcheck.Reponse{State: "healthy", Message: ""}
 					message, _ = json.Marshal(healthReponse)
 				}
 
@@ -89,6 +114,10 @@ func TestFetch(t *testing.T) {
 				}
 
 				w.Write(message)
+				go func() {
+					time.Sleep(1 * time.Second)
+					blocker <- true
+				}()
 			})
 
 			availableServer := httptest.NewServer(availableHandler)
@@ -102,9 +131,8 @@ func TestFetch(t *testing.T) {
 
 			connectionPool := New(config)
 
-			connectionPool.RLock()
-			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
-			connectionPool.RUnlock()
+			waitForHealthCheck(connectionPool, availableServer.URL)
+			<-blocker
 
 			for i := 0; i < 5; i++ {
 				wg.Add(1)
@@ -121,18 +149,20 @@ func TestFetch(t *testing.T) {
 				assertion.Equal(string(result), "hello")
 			}
 
+			println("out of here")
 			assertion.Equal(callCount, 5)
 		})
 
 		t.Run("First connection tried is degraded, Uses next connections", func(t *testing.T) {
 			callCount := 0
 			wg := &sync.WaitGroup{}
+			blocker := make(chan bool)
 
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var message []byte
 
 				if r.URL.Path == "/health" {
-					healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+					healthReponse := &healthcheck.Reponse{State: "healthy", Message: ""}
 					message, _ = json.Marshal(healthReponse)
 				}
 
@@ -143,6 +173,10 @@ func TestFetch(t *testing.T) {
 				}
 
 				w.Write(message)
+				go func() {
+					time.Sleep(1 * time.Second)
+					blocker <- true
+				}()
 			})
 
 			availableServer := httptest.NewServer(availableHandler)
@@ -161,7 +195,8 @@ func TestFetch(t *testing.T) {
 			}
 			connectionPool := New(config)
 
-			connectionPool.healthChecks[availableServer.URL].notifySubscribers(true, availableServer.URL, nil)
+			waitForHealthCheck(connectionPool, availableServer.URL)
+			<-blocker
 
 			reader := strings.NewReader("This is a test")
 			request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
@@ -186,7 +221,7 @@ func TestFetch(t *testing.T) {
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var message []byte
 			if r.URL.Path == "/health" {
-				healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+				healthReponse := &healthcheck.Reponse{State: "healthy", Message: ""}
 				message, _ = json.Marshal(healthReponse)
 			}
 
@@ -223,19 +258,8 @@ func TestFetch(t *testing.T) {
 		_, err = c.Write([]byte(post))
 		assertion.Equal(err, nil)
 
-		connectionPool.RLock()
-		hc := connectionPool.healthChecks[availableServer.URL]
-		connectionPool.RUnlock()
-
-		for hc == nil {
-			time.Sleep(1 * time.Second)
-
-			connectionPool.RLock()
-			hc = connectionPool.healthChecks[availableServer.URL]
-			connectionPool.RUnlock()
-		}
-
-		hc.wg.Wait()
+		waitForHealthCheck(connectionPool, availableServer.URL)
+		<-blocker
 
 		reader := strings.NewReader("This is a test")
 		request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)

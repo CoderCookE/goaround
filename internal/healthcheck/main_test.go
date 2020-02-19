@@ -1,4 +1,4 @@
-package connectionpool
+package healthcheck
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/CoderCookE/goaround/internal/assert"
+	"github.com/CoderCookE/goaround/internal/connection"
 )
 
 func TestHealthChecker(t *testing.T) {
@@ -21,10 +22,10 @@ func TestHealthChecker(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
 	t.Run("backend returns a healthy state", func(t *testing.T) {
-		resChan := make(chan message, 1)
+		resChan := make(chan connection.Message, 1)
 
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			healthReponse := &healthCheckReponse{State: "healthy", Message: ""}
+			healthReponse := &Reponse{State: "healthy", Message: ""}
 			healthMessage, _ := json.Marshal(healthReponse)
 			w.Write(healthMessage)
 		})
@@ -32,9 +33,9 @@ func TestHealthChecker(t *testing.T) {
 		availableServer := httptest.NewServer(availableHandler)
 		defer availableServer.Close()
 
-		hc := NewHealthChecker(
+		hc := New(
 			client,
-			[]chan message{resChan},
+			[]chan connection.Message{resChan},
 			availableServer.URL,
 			false,
 		)
@@ -46,14 +47,14 @@ func TestHealthChecker(t *testing.T) {
 		defer hc.Shutdown()
 
 		health := <-resChan
-		assertion.True(health.health)
+		assertion.True(health.Health)
 	})
 
 	t.Run("backend returns a degraded state", func(t *testing.T) {
-		resChan := make(chan message, 1)
+		resChan := make(chan connection.Message, 1)
 
 		degradedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			healthReponse := &healthCheckReponse{State: "degraded", Message: ""}
+			healthReponse := &Reponse{State: "degraded", Message: ""}
 			healthMessage, _ := json.Marshal(healthReponse)
 			w.Write(healthMessage)
 		})
@@ -61,9 +62,9 @@ func TestHealthChecker(t *testing.T) {
 		degradedServer := httptest.NewServer(degradedHandler)
 		defer degradedServer.Close()
 
-		hc := NewHealthChecker(
+		hc := New(
 			client,
-			[]chan message{resChan},
+			[]chan connection.Message{resChan},
 			degradedServer.URL,
 			true,
 		)
@@ -76,6 +77,6 @@ func TestHealthChecker(t *testing.T) {
 		defer hc.Shutdown()
 
 		health := <-resChan
-		assertion.False(health.health)
+		assertion.False(health.Health)
 	})
 }

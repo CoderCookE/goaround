@@ -1,4 +1,4 @@
-package connectionpool
+package healthcheck
 
 import (
 	"context"
@@ -10,35 +10,37 @@ import (
 	"net/http/httputil"
 	"sync"
 	"time"
+
+	"github.com/CoderCookE/goaround/internal/connection"
 )
 
-type healthCheckReponse struct {
+type Reponse struct {
 	State   string `json:"state"`
 	Message string `json:"message"`
 }
 
-type healthChecker struct {
+type HealthChecker struct {
 	sync.Mutex
-	subscribers   []chan message
+	subscribers   []chan connection.Message
 	currentHealth bool
 	client        *http.Client
 	backend       string
 	done          chan bool
-	wg            *sync.WaitGroup
+	Wg            *sync.WaitGroup
 }
 
-func NewHealthChecker(client *http.Client, subscribers []chan message, backend string, currentHealth bool) *healthChecker {
-	return &healthChecker{
+func New(client *http.Client, subscribers []chan connection.Message, backend string, currentHealth bool) *HealthChecker {
+	return &HealthChecker{
 		client:        client,
 		subscribers:   subscribers,
 		backend:       backend,
 		done:          make(chan bool),
 		currentHealth: currentHealth,
-		wg:            &sync.WaitGroup{},
+		Wg:            &sync.WaitGroup{},
 	}
 }
 
-func (hc *healthChecker) Start(startup *sync.WaitGroup) {
+func (hc *HealthChecker) Start(startup *sync.WaitGroup) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	startup.Done()
@@ -63,7 +65,7 @@ func (hc *healthChecker) Start(startup *sync.WaitGroup) {
 	}
 }
 
-func (hc *healthChecker) Reuse(newBackend string, proxy *httputil.ReverseProxy) *healthChecker {
+func (hc *HealthChecker) Reuse(newBackend string, proxy *httputil.ReverseProxy) *HealthChecker {
 	hc.Lock()
 	hc.backend = newBackend
 	hc.notifySubscribers(false, hc.backend, proxy)
@@ -72,7 +74,7 @@ func (hc *healthChecker) Reuse(newBackend string, proxy *httputil.ReverseProxy) 
 	return hc
 }
 
-func (hc *healthChecker) check(ctx context.Context) {
+func (hc *HealthChecker) check(ctx context.Context) {
 	url := fmt.Sprintf("%s%s", hc.backend, "/health")
 	healthy := hc.currentHealth
 
@@ -91,7 +93,7 @@ func (hc *healthChecker) check(ctx context.Context) {
 			log.Printf("Error with health check, backend: %s, error %s", hc.backend, err.Error())
 			healthy = false
 		} else {
-			healthCheck := &healthCheckReponse{}
+			healthCheck := &Reponse{}
 			json.Unmarshal(body, healthCheck)
 
 			healthy = healthCheck.State == "healthy" || (resp.StatusCode == 200 && healthCheck.State != "degraded")
@@ -104,17 +106,17 @@ func (hc *healthChecker) check(ctx context.Context) {
 	}
 }
 
-func (hc *healthChecker) notifySubscribers(healthy bool, backend string, proxy *httputil.ReverseProxy) {
-	message := message{health: healthy, backend: backend, proxy: proxy, ack: hc.wg}
+func (hc *HealthChecker) notifySubscribers(healthy bool, backend string, proxy *httputil.ReverseProxy) {
+	message := connection.Message{Health: healthy, Backend: backend, Proxy: proxy, Ack: hc.Wg}
 
-	hc.wg.Add(len(hc.subscribers))
+	hc.Wg.Add(len(hc.subscribers))
 	for _, c := range hc.subscribers {
 		c <- message
 	}
 
-	hc.wg.Wait()
+	hc.Wg.Wait()
 }
 
-func (hc *healthChecker) Shutdown() {
+func (hc *HealthChecker) Shutdown() {
 	close(hc.done)
 }

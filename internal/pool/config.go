@@ -1,4 +1,4 @@
-package connectionpool
+package pool
 
 type Config struct {
 	Backends    []string

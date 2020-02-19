@@ -7,14 +7,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CoderCookE/goaround/internal/connectionpool"
 	"github.com/CoderCookE/goaround/internal/customflags"
+	"github.com/CoderCookE/goaround/internal/pool"
 )
 
 func main() {
 	portString, backends, numConns, cacert, privkey, enableCache := parseFlags()
 
-	config := &connectionpool.Config{
+	config := &pool.Config{
 		Backends:    backends,
 		NumConns:    *numConns,
 		EnableCache: *enableCache,
@@ -22,7 +22,7 @@ func main() {
 
 	log.Printf("Starting with conf, %s %s %d", portString, backends, *numConns)
 
-	connectionPool := connectionpool.New(config)
+	connectionPool := pool.New(config)
 	defer connectionPool.Shutdown()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

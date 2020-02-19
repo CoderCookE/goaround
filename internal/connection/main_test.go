@@ -1,4 +1,4 @@
-package connectionpool
+package connection
 
 import (
 	"net/http"
@@ -39,13 +39,13 @@ func TestConnection(t *testing.T) {
 		proxy.Transport = tr
 
 		wg.Add(1)
-		conn, err := newConnection(proxy, backend, cache, wg)
+		conn, err := NewConnection(proxy, backend, cache, wg)
 		assertion.Equal(err, nil)
 
 		assertion.False(conn.healthy)
 
 		wg.Add(1)
-		conn.messages <- message{health: true, ack: wg}
+		conn.Messages <- Message{Health: true, Ack: wg}
 		wg.Wait()
 
 		conn.Lock()
@@ -54,7 +54,7 @@ func TestConnection(t *testing.T) {
 		assertion.True(health)
 
 		wg.Add(1)
-		conn.messages <- message{health: false, ack: wg}
+		conn.Messages <- Message{Health: false, Ack: wg}
 		wg.Wait()
 
 		conn.Lock()
