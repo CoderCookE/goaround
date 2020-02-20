@@ -21,6 +21,46 @@ func TestHealthChecker(t *testing.T) {
 	client := &http.Client{Transport: tr}
 	assertion := &assert.Asserter{T: t}
 
+	t.Run("reuse notifies subscribers", func(t *testing.T) {
+		resChan := make(chan connection.Message, 1)
+
+		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			healthReponse := &Reponse{State: "healthy", Message: ""}
+			healthMessage, _ := json.Marshal(healthReponse)
+			w.Write(healthMessage)
+		})
+
+		availableServer := httptest.NewServer(availableHandler)
+		defer availableServer.Close()
+
+		hc := New(
+			client,
+			[]chan connection.Message{resChan},
+			availableServer.URL,
+			false,
+		)
+
+		defer hc.Shutdown()
+
+		blocker := make(chan bool, 1)
+		var msg connection.Message
+		go func() {
+			for {
+				select {
+				case msg = <-resChan:
+					msg.Ack.Done()
+					blocker <- true
+				}
+			}
+		}()
+
+		hc = hc.Reuse("foobar", nil)
+
+		<-blocker
+		assertion.Equal(msg.Health, false)
+		assertion.Equal(msg.Backend, "foobar")
+	})
+
 	t.Run("backend returns a healthy state", func(t *testing.T) {
 		resChan := make(chan connection.Message, 1)
 
@@ -61,6 +101,33 @@ func TestHealthChecker(t *testing.T) {
 
 		degradedServer := httptest.NewServer(degradedHandler)
 		defer degradedServer.Close()
+
+		hc := New(
+			client,
+			[]chan connection.Message{resChan},
+			degradedServer.URL,
+			true,
+		)
+
+		startup := &sync.WaitGroup{}
+		startup.Add(1)
+		go hc.Start(startup)
+		startup.Wait()
+
+		defer hc.Shutdown()
+
+		health := <-resChan
+		assertion.False(health.Health)
+	})
+
+	t.Run("backend returns an error", func(t *testing.T) {
+		resChan := make(chan connection.Message, 1)
+
+		degradedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		})
+
+		degradedServer := httptest.NewServer(degradedHandler)
+		degradedServer.Close()
 
 		hc := New(
 			client,
