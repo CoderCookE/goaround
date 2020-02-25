@@ -34,6 +34,7 @@ func NewConnection(proxy *httputil.ReverseProxy, backend string, cache *ristrett
 	}
 
 	go conn.healthCheck()
+
 	startup.Done()
 
 	return conn, nil
@@ -45,9 +46,9 @@ func (c *Connection) Get(w http.ResponseWriter, r *http.Request) error {
 
 	health := c.healthy
 	err := errors.New("Unhealthy Node")
-	if c.cache != nil {
+	if c.cache != nil && r.Method == "GET" {
 		value, found := c.cache.Get(r.URL.Path)
-		if found && r.Method == "GET" {
+		if found {
 			res := value.(string)
 			w.Write([]byte(res))
 
