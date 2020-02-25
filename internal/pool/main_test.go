@@ -204,6 +204,7 @@ func TestFetch(t *testing.T) {
 
 			wg.Add(1)
 			connectionPool.Fetch(recorder, request)
+			wg.Wait()
 
 			result, err := ioutil.ReadAll(recorder.Result().Body)
 			assertion.Equal(err, nil)
