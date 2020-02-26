@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -37,8 +36,7 @@ func TestFetch(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 	t.Run("With cache", func(t *testing.T) {
 		t.Run("Fetches from cache", func(t *testing.T) {
-			callCount := 0
-			wg := &sync.WaitGroup{}
+			var callCount int
 			blocker := make(chan bool)
 
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,12 +48,12 @@ func TestFetch(t *testing.T) {
 				}
 
 				if r.URL.Path == "/foo" {
-					wg.Done()
 					callCount += 1
 					message = []byte("hello")
 				}
 
 				w.Write(message)
+
 				go func() {
 					time.Sleep(1 * time.Second)
 					blocker <- true
@@ -75,14 +73,11 @@ func TestFetch(t *testing.T) {
 			connectionPool := New(config)
 
 			<-blocker
-			wg.Add(1)
 			for i := 0; i < 5; i++ {
 				reader := strings.NewReader("This is a test")
 				request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
 				recorder := httptest.NewRecorder()
 				connectionPool.Fetch(recorder, request)
-
-				wg.Wait()
 
 				result, err := ioutil.ReadAll(recorder.Result().Body)
 				assertion.Equal(err, nil)
@@ -95,8 +90,7 @@ func TestFetch(t *testing.T) {
 
 	t.Run("No cache", func(t *testing.T) {
 		t.Run("fetches each request from server", func(t *testing.T) {
-			callCount := 0
-			wg := &sync.WaitGroup{}
+			var callCount int
 			blocker := make(chan bool)
 
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +102,6 @@ func TestFetch(t *testing.T) {
 				}
 
 				if r.URL.Path == "/foo" {
-					wg.Done()
 					callCount += 1
 					message = []byte("hello")
 				}
@@ -135,13 +128,10 @@ func TestFetch(t *testing.T) {
 			<-blocker
 
 			for i := 0; i < 5; i++ {
-				wg.Add(1)
 				reader := strings.NewReader("This is a test")
 				request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
 				recorder := httptest.NewRecorder()
 				connectionPool.Fetch(recorder, request)
-
-				wg.Wait()
 
 				result, err := ioutil.ReadAll(recorder.Result().Body)
 				assertion.Equal(err, nil)
@@ -149,13 +139,11 @@ func TestFetch(t *testing.T) {
 				assertion.Equal(string(result), "hello")
 			}
 
-			println("out of here")
 			assertion.Equal(callCount, 5)
 		})
 
 		t.Run("First connection tried is degraded, Uses next connections", func(t *testing.T) {
 			callCount := 0
-			wg := &sync.WaitGroup{}
 			blocker := make(chan bool)
 
 			availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -167,7 +155,6 @@ func TestFetch(t *testing.T) {
 				}
 
 				if r.URL.Path == "/foo" {
-					wg.Done()
 					callCount += 1
 					message = []byte("hello")
 				}
@@ -202,9 +189,7 @@ func TestFetch(t *testing.T) {
 			request := httptest.NewRequest("GET", "http://www.test.com/foo", reader)
 			recorder := httptest.NewRecorder()
 
-			wg.Add(1)
 			connectionPool.Fetch(recorder, request)
-			wg.Wait()
 
 			result, err := ioutil.ReadAll(recorder.Result().Body)
 			assertion.Equal(err, nil)
@@ -215,9 +200,8 @@ func TestFetch(t *testing.T) {
 	})
 
 	t.Run("Listens on unix socket for updates to backends", func(t *testing.T) {
-		callCount := 0
-		wg := &sync.WaitGroup{}
 		blocker := make(chan bool)
+		var callCount int
 
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var message []byte
@@ -227,7 +211,6 @@ func TestFetch(t *testing.T) {
 			}
 
 			if r.URL.Path == "/foo" {
-				wg.Done()
 				callCount += 1
 				message = []byte("bar")
 			}
@@ -267,9 +250,7 @@ func TestFetch(t *testing.T) {
 		recorder := httptest.NewRecorder()
 
 		<-blocker
-		wg.Add(1)
 		connectionPool.Fetch(recorder, request)
-		wg.Wait()
 
 		result, err := ioutil.ReadAll(recorder.Result().Body)
 		assertion.Equal(err, nil)
