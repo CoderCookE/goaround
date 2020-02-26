@@ -34,6 +34,15 @@ func (a *Asserter) NotEqual(actual, expected interface{}) {
 	}
 }
 
+func (a *Asserter) LessThan(actual, expected float64) {
+	a.T.Helper()
+
+	if !(expected < actual) {
+		message := fmt.Sprintf("expected: %v was not less than to actual: %v", expected, actual)
+		a.T.Error(message)
+	}
+}
+
 func (a *Asserter) True(actual bool) {
 	a.T.Helper()
 
