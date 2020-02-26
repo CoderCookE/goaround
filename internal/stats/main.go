@@ -43,10 +43,7 @@ func StartUp() {
 
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
-		promhttp.HandlerOpts{
-			// Opt into OpenMetrics to support exemplars.
-			EnableOpenMetrics: true,
-		},
+		promhttp.HandlerOpts{},
 	))
 
 	log.Fatal(http.ListenAndServe(*addr, nil))
