@@ -1,9 +1,8 @@
-package connectionpool
+package pool
 
 import (
 	"bufio"
 	"bytes"
-	"github.com/dgraph-io/ristretto"
 	"io/ioutil"
 	"log"
 	"math"
@@ -16,12 +15,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dgraph-io/ristretto"
+
+	"github.com/CoderCookE/goaround/internal/connection"
+	"github.com/CoderCookE/goaround/internal/healthcheck"
 )
 
 type pool struct {
 	sync.RWMutex
-	connections     chan *connection
-	healthChecks    map[string]*healthChecker
+	connections     chan *connection.Connection
+	healthChecks    map[string]*healthcheck.HealthChecker
 	client          *http.Client
 	connsPerBackend int
 	cacheEnabled    bool
@@ -68,15 +72,15 @@ func New(c *Config) *pool {
 	}
 
 	connectionPool := &pool{
-		connections:     make(chan *connection, maxRequests),
-		healthChecks:    make(map[string]*healthChecker),
+		connections:     make(chan *connection.Connection, maxRequests),
+		healthChecks:    make(map[string]*healthcheck.HealthChecker),
 		client:          client,
 		connsPerBackend: connsPerBackend,
 		cache:           cache,
 		cacheEnabled:    cacheEnabled,
 	}
 
-	poolConnections := []*connection{}
+	poolConnections := []*connection.Connection{}
 
 	startup := &sync.WaitGroup{}
 	for _, backend := range backends {
@@ -92,7 +96,7 @@ func New(c *Config) *pool {
 	return connectionPool
 }
 
-func shuffle(conns []*connection, ch chan *connection) {
+func shuffle(conns []*connection.Connection, ch chan *connection.Connection) {
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(conns), func(i, j int) {
 		conns[i], conns[j] = conns[j], conns[i]
@@ -117,12 +121,12 @@ func buildCache() (*ristretto.Cache, error) {
 //Returns a 503 status code if request is unsuccessful
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	select {
-	case connection := <-p.connections:
+	case conn := <-p.connections:
 		defer func() {
-			p.connections <- connection
+			p.connections <- conn
 		}()
 
-		err := connection.get(w, r)
+		err := conn.Get(w, r)
 		if err != nil {
 			log.Printf("retrying err with request: %s", err.Error())
 			p.Fetch(w, r)
@@ -217,7 +221,7 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 				p.Unlock()
 			}
 
-			poolConnections := []*connection{}
+			poolConnections := []*connection.Connection{}
 			for _, addedBackend := range added {
 				startup.Add(1)
 				poolConnections = p.addBackend(poolConnections, addedBackend, startup)
@@ -254,7 +258,7 @@ func difference(original []string, updated []string) (added []string, removed []
 	return
 }
 
-func (p *pool) addBackend(connections []*connection, backend string, startup *sync.WaitGroup) []*connection {
+func (p *pool) addBackend(connections []*connection.Connection, backend string, startup *sync.WaitGroup) []*connection.Connection {
 	url, err := url.ParseRequestURI(backend)
 	if err != nil {
 		log.Printf("error parsing backend url: %s", backend)
@@ -280,21 +284,21 @@ func (p *pool) addBackend(connections []*connection, backend string, startup *sy
 		}
 
 		startup.Add(1)
-		configuredConn, err := newConnection(proxy, backend, p.cache, startup)
+		configuredConn, err := connection.NewConnection(proxy, backend, p.cache, startup)
 		if err != nil {
 			log.Printf("Error adding connection for: %s", backend)
 		} else {
-			backendConnections := make([]chan message, p.connsPerBackend)
+			backendConnections := make([]chan connection.Message, p.connsPerBackend)
 
 			for i := 0; i < p.connsPerBackend; i++ {
 				connections = append(connections, configuredConn)
-				backendConnections[i] = configuredConn.messages
+				backendConnections[i] = configuredConn.Messages
 			}
 
-			hc := NewHealthChecker(
+			hc := healthcheck.New(
 				p.client,
 				backendConnections,
-				configuredConn.backend,
+				configuredConn.Backend,
 				false,
 			)
 
