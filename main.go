@@ -9,6 +9,7 @@ import (
 
 	"github.com/CoderCookE/goaround/internal/customflags"
 	"github.com/CoderCookE/goaround/internal/pool"
+	"github.com/CoderCookE/goaround/internal/stats"
 )
 
 func main() {
@@ -29,8 +30,13 @@ func main() {
 		start := time.Now()
 		defer r.Body.Close()
 		connectionPool.Fetch(w, r)
-		log.Printf("Request completed in %v seconds", time.Since(start).Seconds())
+
+		duration := time.Since(start).Seconds()
+		stats.Durations.WithLabelValues("handle").Observe(duration)
+		log.Printf("Request completed in %v seconds", duration)
 	})
+
+	go stats.StartUp()
 
 	server := &http.Server{
 		Addr:         portString,

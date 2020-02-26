@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/dgraph-io/ristretto"
+
+	"github.com/CoderCookE/goaround/internal/stats"
 )
 
 type Message struct {
@@ -49,11 +51,13 @@ func (c *Connection) Get(w http.ResponseWriter, r *http.Request) error {
 	if c.cache != nil && r.Method == "GET" {
 		value, found := c.cache.Get(r.URL.Path)
 		if found {
+			stats.CacheCounter.WithLabelValues("hit").Add(1)
 			res := value.(string)
 			w.Write([]byte(res))
 
 			return nil
 		}
+		stats.CacheCounter.WithLabelValues("miss").Add(1)
 	}
 
 	if health {
