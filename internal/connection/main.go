@@ -2,66 +2,52 @@ package connection
 
 import (
 	"errors"
-	"net/http"
 	"net/http/httputil"
 	"sync"
 
-	"github.com/dgraph-io/ristretto"
+	"github.com/CoderCookE/goaround/internal/stats"
 )
 
 type Message struct {
-	Health  bool
-	Backend string
-	Proxy   *httputil.ReverseProxy
-	Ack     *sync.WaitGroup
+	Health   bool
+	Backend  string
+	Proxy    *httputil.ReverseProxy
+	Ack      *sync.WaitGroup
+	Shutdown bool
 }
 
 type Connection struct {
 	healthy  bool
+	Shut     bool
 	Messages chan Message
 	Backend  string
 	sync.RWMutex
 	proxy *httputil.ReverseProxy
-	cache *ristretto.Cache
 }
 
-func NewConnection(proxy *httputil.ReverseProxy, backend string, cache *ristretto.Cache, startup *sync.WaitGroup) *Connection {
+func NewConnection(proxy *httputil.ReverseProxy, backend string, startup *sync.WaitGroup) *Connection {
 	conn := &Connection{
 		Backend:  backend,
 		Messages: make(chan Message),
 		proxy:    proxy,
-		cache:    cache,
 	}
 
 	go conn.healthCheck()
-
 	startup.Done()
 
 	return conn
 }
 
-func (c *Connection) Get(w http.ResponseWriter, r *http.Request) error {
-	c.RLock()
-	defer c.RUnlock()
+func (c *Connection) Get() (*httputil.ReverseProxy, error) {
+	c.Lock()
+	defer c.Unlock()
 
 	health := c.healthy
-	err := errors.New("Unhealthy Node")
-	if c.cache != nil && r.Method == "GET" {
-		value, found := c.cache.Get(r.URL.Path)
-		if found {
-			res := value.(string)
-			w.Write([]byte(res))
-
-			return nil
-		}
+	if health && !c.Shut {
+		return c.proxy, nil
 	}
 
-	if health {
-		c.proxy.ServeHTTP(w, r)
-		return nil
-	}
-
-	return err
+	return nil, errors.New("Unhealthy Node")
 }
 
 func (c *Connection) healthCheck() {
@@ -69,13 +55,20 @@ func (c *Connection) healthCheck() {
 		select {
 		case msg := <-c.Messages:
 			c.Lock()
-			backend := msg.Backend
-			c.healthy = msg.Health
-			proxy := msg.Proxy
+			if msg.Shutdown {
+				c.Shutdown()
+				c.Unlock()
+				return
+			} else {
+				backend := msg.Backend
+				c.healthy = msg.Health
+				proxy := msg.Proxy
 
-			if proxy != nil && c.Backend != backend {
-				c.Backend = backend
-				c.proxy = proxy
+				if proxy != nil && c.Backend != backend {
+					c.Backend = backend
+					c.proxy = proxy
+				}
+
 			}
 
 			msg.Ack.Done()
@@ -85,5 +78,8 @@ func (c *Connection) healthCheck() {
 }
 
 func (c *Connection) Shutdown() {
+	c.healthy = false
+	c.Shut = true
 	close(c.Messages)
+	stats.AvailableConnectionsGauge.WithLabelValues("available").Sub(1)
 }

@@ -9,10 +9,11 @@ import (
 
 	"github.com/CoderCookE/goaround/internal/customflags"
 	"github.com/CoderCookE/goaround/internal/pool"
+	"github.com/CoderCookE/goaround/internal/stats"
 )
 
 func main() {
-	portString, backends, numConns, cacert, privkey, enableCache := parseFlags()
+	portString, metricPortString, backends, numConns, cacert, privkey, enableCache := parseFlags()
 
 	config := &pool.Config{
 		Backends:    backends,
@@ -29,14 +30,18 @@ func main() {
 		start := time.Now()
 		defer r.Body.Close()
 		connectionPool.Fetch(w, r)
-		log.Printf("Request completed in %v seconds", time.Since(start).Seconds())
+
+		duration := time.Since(start).Seconds()
+		stats.Durations.WithLabelValues("handle").Observe(duration)
 	})
+
+	go stats.StartUp(metricPortString)
 
 	server := &http.Server{
 		Addr:         portString,
 		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 20 * time.Second,
+		WriteTimeout: 30 * time.Second,
 	}
 
 	defer server.Close()
@@ -53,7 +58,7 @@ func main() {
 	}
 }
 
-func parseFlags() (portString string, backends customflags.Backend, numConns *int, cacert *string, privkey *string, enableCache *bool) {
+func parseFlags() (portString, metricPortString string, backends customflags.Backend, numConns *int, cacert *string, privkey *string, enableCache *bool) {
 	port := flag.Int("p", 3000, "Load Balancer Listen Port (default: 3000)")
 	numConns = flag.Int("n", 3, "Max number of connections per backend")
 
@@ -63,9 +68,11 @@ func parseFlags() (portString string, backends customflags.Backend, numConns *in
 	cacert = flag.String("cacert", "", "cacert location")
 	privkey = flag.String("privkey", "", "privkey location")
 
+	metricPort := flag.Int("prometheus-port", 8080, "The address to listen on for HTTP requests.")
 	enableCache = flag.Bool("cache", false, "Enable request cache")
 	flag.Parse()
 	portString = fmt.Sprintf(":%d", *port)
+	metricPortString = fmt.Sprintf(":%d", *metricPort)
 
 	return
 }

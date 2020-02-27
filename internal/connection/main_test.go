@@ -1,17 +1,16 @@
 package connection
 
 import (
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/CoderCookE/goaround/internal/assert"
-	"github.com/dgraph-io/ristretto"
 )
 
 func TestConnection(t *testing.T) {
@@ -28,17 +27,9 @@ func TestConnection(t *testing.T) {
 
 	assertion := &assert.Asserter{T: t}
 
-	t.Run("When get is called", func(t *testing.T) {
-
+	t.Run("When get is called on a healthy connection", func(t *testing.T) {
 		availableServer := httptest.NewServer(availableHandler)
 		backend := availableServer.URL
-
-		cache, err := ristretto.NewCache(&ristretto.Config{
-			NumCounters: 1e7,     // number of keys to track frequency of (10M).
-			MaxCost:     1 << 30, // maximum cost of cache (1GB).
-			BufferItems: 64,      // number of keys per Get buffer.
-		})
-		assertion.Equal(err, nil)
 
 		url, err := url.ParseRequestURI(backend)
 		assertion.Equal(err, nil)
@@ -48,34 +39,20 @@ func TestConnection(t *testing.T) {
 
 		startup := &sync.WaitGroup{}
 		startup.Add(1)
-		conn := NewConnection(proxy, backend, cache, startup)
+		conn := NewConnection(proxy, backend, startup)
 
 		assertion.NotEqual(conn, nil)
 		assertion.Equal(err, nil)
 		startup.Wait()
 		conn.healthy = true
 
-		req := httptest.NewRequest(http.MethodGet, backend, nil)
-		res := httptest.NewRecorder()
-		conn.Get(res, req)
-
-		result, err := ioutil.ReadAll(res.Result().Body)
+		usableProxy, err := conn.Get()
 		assertion.Equal(err, nil)
-		defer res.Result().Body.Close()
-
-		assertion.Equal(string(result), "hello")
+		assertion.Equal(reflect.TypeOf(usableProxy).String(), "*httputil.ReverseProxy")
 	})
 
 	t.Run("starts in an unhealthy state", func(t *testing.T) {
 		backend := "http://www.google.com/"
-
-		cache, err := ristretto.NewCache(&ristretto.Config{
-			NumCounters: 1e7,     // number of keys to track frequency of (10M).
-			MaxCost:     1 << 30, // maximum cost of cache (1GB).
-			BufferItems: 64,      // number of keys per Get buffer.
-		})
-		assertion.Equal(err, nil)
-		assertion.NotEqual(cache, nil)
 
 		url, err := url.ParseRequestURI(backend)
 		assertion.Equal(err, nil)
@@ -85,7 +62,7 @@ func TestConnection(t *testing.T) {
 
 		startup := &sync.WaitGroup{}
 		startup.Add(1)
-		conn := NewConnection(proxy, backend, cache, startup)
+		conn := NewConnection(proxy, backend, startup)
 		assertion.Equal(err, nil)
 		startup.Wait()
 
@@ -95,13 +72,6 @@ func TestConnection(t *testing.T) {
 	t.Run("when passed a new health stat", func(t *testing.T) {
 		backend := "http://www.google.com/"
 
-		cache, err := ristretto.NewCache(&ristretto.Config{
-			NumCounters: 1e7,     // number of keys to track frequency of (10M).
-			MaxCost:     1 << 30, // maximum cost of cache (1GB).
-			BufferItems: 64,      // number of keys per Get buffer.
-		})
-		assertion.Equal(err, nil)
-
 		url, err := url.ParseRequestURI(backend)
 		assertion.Equal(err, nil)
 
@@ -110,7 +80,7 @@ func TestConnection(t *testing.T) {
 
 		startup := &sync.WaitGroup{}
 		startup.Add(1)
-		conn := NewConnection(proxy, backend, cache, startup)
+		conn := NewConnection(proxy, backend, startup)
 		startup.Wait()
 
 		wg := &sync.WaitGroup{}

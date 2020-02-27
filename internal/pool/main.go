@@ -20,6 +20,7 @@ import (
 
 	"github.com/CoderCookE/goaround/internal/connection"
 	"github.com/CoderCookE/goaround/internal/healthcheck"
+	"github.com/CoderCookE/goaround/internal/stats"
 )
 
 type pool struct {
@@ -48,19 +49,16 @@ func New(c *Config) *pool {
 
 	tr := &http.Transport{
 		DialContext: (&net.Dialer{
-			Timeout: 10 * time.Second,
+			Timeout:   10 * time.Second,
+			KeepAlive: 10 * time.Second,
 		}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 10 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-		MaxIdleConns:          maxRequests + backendCount,
-		IdleConnTimeout:       120 * time.Second,
-		MaxConnsPerHost:       connsPerBackend + 1,
-		MaxIdleConnsPerHost:   connsPerBackend + 1,
+		ResponseHeaderTimeout: 60 * time.Second,
 	}
 
 	client := &http.Client{
-		Timeout:   30 * time.Second,
+		Timeout:   60 * time.Second,
 		Transport: tr,
 	}
 
@@ -91,7 +89,6 @@ func New(c *Config) *pool {
 	shuffle(poolConnections, connectionPool.connections)
 
 	go connectionPool.ListenForBackendChanges(startup)
-	startup.Wait()
 
 	return connectionPool
 }
@@ -103,6 +100,7 @@ func shuffle(conns []*connection.Connection, ch chan *connection.Connection) {
 	})
 
 	for _, conn := range conns {
+		stats.AvailableConnectionsGauge.WithLabelValues("available").Add(1)
 		ch <- conn
 	}
 }
@@ -120,19 +118,33 @@ func buildCache() (*ristretto.Cache, error) {
 //Exported method for passing a request to a connection from the pool
 //Returns a 503 status code if request is unsuccessful
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
-	select {
-	case conn := <-p.connections:
-		defer func() {
+	conn := <-p.connections
+	stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
+	defer func() {
+		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
+		if !conn.Shut {
 			p.connections <- conn
-		}()
-
-		err := conn.Get(w, r)
-		if err != nil {
-			log.Printf("retrying err with request: %s", err.Error())
-			p.Fetch(w, r)
 		}
-	default:
-		w.WriteHeader(http.StatusServiceUnavailable)
+	}()
+
+	if p.cache != nil && r.Method == "GET" {
+		value, found := p.cache.Get(r.URL.Path)
+		if found {
+			stats.CacheCounter.WithLabelValues("hit").Add(1)
+			res := value.(string)
+			w.Write([]byte(res))
+			return
+		}
+
+		stats.CacheCounter.WithLabelValues("miss").Add(1)
+	}
+
+	usableProxy, err := conn.Get()
+	if err != nil {
+		log.Printf("retrying err with request: %s", err.Error())
+		p.Fetch(w, r)
+	} else {
+		usableProxy.ServeHTTP(w, r)
 	}
 }
 
@@ -166,13 +178,11 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 		scanner := bufio.NewScanner(conn)
 		for scanner.Scan() {
 			updated := strings.Split(scanner.Text(), ",")
-
+			p.Lock()
 			var currentBackends []string
-			p.RLock()
 			for k := range p.healthChecks {
 				currentBackends = append(currentBackends, k)
 			}
-			p.RUnlock()
 
 			added, removed := difference(currentBackends, updated)
 			log.Printf("Adding: %s", added)
@@ -205,29 +215,26 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 							proxy.ModifyResponse = cacheResponse
 						}
 
-						p.Lock()
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
 						p.healthChecks[new] = newHC
-						p.Unlock()
 					}
 				} else {
-					p.Lock()
 					p.healthChecks[removedBackend].Shutdown()
-					p.Unlock()
 				}
 
-				p.Lock()
 				delete(p.healthChecks, removedBackend)
-				p.Unlock()
 			}
 
 			poolConnections := []*connection.Connection{}
+
+			wg := &sync.WaitGroup{}
 			for _, addedBackend := range added {
-				startup.Add(1)
-				poolConnections = p.addBackend(poolConnections, addedBackend, startup)
+				wg.Add(1)
+				poolConnections = p.addBackend(poolConnections, addedBackend, wg)
 			}
 
 			shuffle(poolConnections, p.connections)
+			p.Unlock()
 		}
 	}
 }
@@ -286,7 +293,7 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 		backendConnections := make([]chan connection.Message, p.connsPerBackend)
 		for i := 0; i < p.connsPerBackend; i++ {
 			startup.Add(1)
-			configuredConn := connection.NewConnection(proxy, backend, p.cache, startup)
+			configuredConn := connection.NewConnection(proxy, backend, startup)
 			connections = append(connections, configuredConn)
 			backendConnections[i] = configuredConn.Messages
 		}
@@ -298,13 +305,11 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 			false,
 		)
 
-		p.Lock()
 		p.healthChecks[backend] = hc
-		p.Unlock()
 
 		go hc.Start(startup)
-
 	}
 
+	startup.Wait()
 	return connections
 }
