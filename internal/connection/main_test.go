@@ -48,7 +48,7 @@ func TestConnection(t *testing.T) {
 
 		startup := &sync.WaitGroup{}
 		startup.Add(1)
-		conn, err := NewConnection(proxy, backend, cache, startup)
+		conn := NewConnection(proxy, backend, cache, startup)
 
 		assertion.NotEqual(conn, nil)
 		assertion.Equal(err, nil)
@@ -85,7 +85,7 @@ func TestConnection(t *testing.T) {
 
 		startup := &sync.WaitGroup{}
 		startup.Add(1)
-		conn, err := NewConnection(proxy, backend, cache, startup)
+		conn := NewConnection(proxy, backend, cache, startup)
 		assertion.Equal(err, nil)
 		startup.Wait()
 
@@ -110,7 +110,7 @@ func TestConnection(t *testing.T) {
 
 		startup := &sync.WaitGroup{}
 		startup.Add(1)
-		conn, err := NewConnection(proxy, backend, cache, startup)
+		conn := NewConnection(proxy, backend, cache, startup)
 		startup.Wait()
 
 		wg := &sync.WaitGroup{}
