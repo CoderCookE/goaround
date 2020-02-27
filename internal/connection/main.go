@@ -12,10 +12,11 @@ import (
 )
 
 type Message struct {
-	Health  bool
-	Backend string
-	Proxy   *httputil.ReverseProxy
-	Ack     *sync.WaitGroup
+	Health   bool
+	Backend  string
+	Proxy    *httputil.ReverseProxy
+	Ack      *sync.WaitGroup
+	Shutdown bool
 }
 
 type Connection struct {
