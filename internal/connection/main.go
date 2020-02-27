@@ -58,8 +58,6 @@ func (c *Connection) healthCheck() {
 			if msg.Shutdown {
 				c.Shutdown()
 				c.Unlock()
-
-				stats.AvailableConnectionsGauge.WithLabelValues("available").Sub(1)
 				return
 			} else {
 				backend := msg.Backend
@@ -83,4 +81,5 @@ func (c *Connection) Shutdown() {
 	c.healthy = false
 	c.Shut = true
 	close(c.Messages)
+	stats.AvailableConnectionsGauge.WithLabelValues("available").Sub(1)
 }

@@ -118,15 +118,16 @@ func buildCache() (*ristretto.Cache, error) {
 //Exported method for passing a request to a connection from the pool
 //Returns a 503 status code if request is unsuccessful
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
-	stats.AvailableConnectionsGauge.WithLabelValues("ideal").Set(float64(len(p.connections)))
 	select {
 	case conn := <-p.connections:
 		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
+		stats.AvailableConnectionsGauge.WithLabelValues("ideal").Sub(1)
 		defer func() {
 			stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
 			if !conn.Shut {
 				p.connections <- conn
 			}
+			stats.AvailableConnectionsGauge.WithLabelValues("ideal").Set(float64(len(p.connections)))
 		}()
 
 		if p.cache != nil && r.Method == "GET" {
