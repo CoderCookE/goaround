@@ -283,31 +283,27 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 			proxy.ModifyResponse = cacheResponse
 		}
 
-		startup.Add(1)
-		configuredConn, err := connection.NewConnection(proxy, backend, p.cache, startup)
-		if err != nil {
-			log.Printf("Error adding connection for: %s", backend)
-		} else {
-			backendConnections := make([]chan connection.Message, p.connsPerBackend)
-
-			for i := 0; i < p.connsPerBackend; i++ {
-				connections = append(connections, configuredConn)
-				backendConnections[i] = configuredConn.Messages
-			}
-
-			hc := healthcheck.New(
-				p.client,
-				backendConnections,
-				configuredConn.Backend,
-				false,
-			)
-
-			p.Lock()
-			p.healthChecks[backend] = hc
-			p.Unlock()
-
-			go hc.Start(startup)
+		backendConnections := make([]chan connection.Message, p.connsPerBackend)
+		for i := 0; i < p.connsPerBackend; i++ {
+			startup.Add(1)
+			configuredConn := connection.NewConnection(proxy, backend, p.cache, startup)
+			connections = append(connections, configuredConn)
+			backendConnections[i] = configuredConn.Messages
 		}
+
+		hc := healthcheck.New(
+			p.client,
+			backendConnections,
+			backend,
+			false,
+		)
+
+		p.Lock()
+		p.healthChecks[backend] = hc
+		p.Unlock()
+
+		go hc.Start(startup)
+
 	}
 
 	return connections
