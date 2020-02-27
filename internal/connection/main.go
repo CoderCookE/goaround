@@ -25,7 +25,7 @@ type Connection struct {
 	cache *ristretto.Cache
 }
 
-func NewConnection(proxy *httputil.ReverseProxy, backend string, cache *ristretto.Cache, startup *sync.WaitGroup) (*Connection, error) {
+func NewConnection(proxy *httputil.ReverseProxy, backend string, cache *ristretto.Cache, startup *sync.WaitGroup) *Connection {
 	conn := &Connection{
 		Backend:  backend,
 		Messages: make(chan Message),
@@ -37,7 +37,7 @@ func NewConnection(proxy *httputil.ReverseProxy, backend string, cache *ristrett
 
 	startup.Done()
 
-	return conn, nil
+	return conn
 }
 
 func (c *Connection) Get(w http.ResponseWriter, r *http.Request) error {

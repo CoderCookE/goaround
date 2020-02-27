@@ -34,6 +34,20 @@ func waitForHealthCheck(connectionPool *pool, server string) {
 
 func TestFetch(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
+
+	t.Run("Creates connections", func(t *testing.T) {
+		backends := []string{"http://www.foo.com"}
+
+		config := &Config{
+			Backends:    backends,
+			NumConns:    10,
+			EnableCache: true,
+		}
+
+		connectionPool := New(config)
+		assertion.Equal(len(connectionPool.connections), config.NumConns)
+	})
+
 	t.Run("With cache", func(t *testing.T) {
 		t.Run("Fetches from cache", func(t *testing.T) {
 			var callCount int
