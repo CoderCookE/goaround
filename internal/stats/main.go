@@ -25,17 +25,34 @@ var (
 
 	CacheCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "Cache",
-			Help: "Cache hit and misses",
+			Name: "cache",
+			Help: "cache hit and misses",
 		},
 		[]string{"cache"},
+	)
+
+	HealthGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "backends",
+			Help: "number of healthy backends",
+		},
+		[]string{"backends"},
+	)
+
+	AvailableConnectionsGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "connections",
+			Help: "number of available connections",
+		},
+		[]string{"connections"},
 	)
 )
 
 func init() {
-	// Register the summary and the histogram with Prometheus's default registry.
 	prometheus.MustRegister(Durations)
 	prometheus.MustRegister(CacheCounter)
+	prometheus.MustRegister(HealthGauge)
+	prometheus.MustRegister(AvailableConnectionsGauge)
 }
 
 func StartUp() {

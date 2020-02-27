@@ -27,7 +27,7 @@ type Connection struct {
 	cache *ristretto.Cache
 }
 
-func NewConnection(proxy *httputil.ReverseProxy, backend string, cache *ristretto.Cache, startup *sync.WaitGroup) (*Connection, error) {
+func NewConnection(proxy *httputil.ReverseProxy, backend string, cache *ristretto.Cache, startup *sync.WaitGroup) *Connection {
 	conn := &Connection{
 		Backend:  backend,
 		Messages: make(chan Message),
@@ -39,7 +39,9 @@ func NewConnection(proxy *httputil.ReverseProxy, backend string, cache *ristrett
 
 	startup.Done()
 
-	return conn, nil
+	stats.AvailableConnectionsGauge.WithLabelValues("available").Add(1)
+
+	return conn
 }
 
 func (c *Connection) Get(w http.ResponseWriter, r *http.Request) error {
@@ -71,23 +73,30 @@ func (c *Connection) Get(w http.ResponseWriter, r *http.Request) error {
 func (c *Connection) healthCheck() {
 	for {
 		select {
+
 		case msg := <-c.Messages:
 			c.Lock()
-			backend := msg.Backend
-			c.healthy = msg.Health
-			proxy := msg.Proxy
+			if msg.Shutdown {
+			} else {
+				backend := msg.Backend
+				c.healthy = msg.Health
+				proxy := msg.Proxy
 
-			if proxy != nil && c.Backend != backend {
-				c.Backend = backend
-				c.proxy = proxy
+				if proxy != nil && c.Backend != backend {
+					c.Backend = backend
+					c.proxy = proxy
+				}
+
+				msg.Ack.Done()
 			}
-
-			msg.Ack.Done()
 			c.Unlock()
 		}
 	}
 }
 
 func (c *Connection) Shutdown() {
+	c.Lock()
+	stats.AvailableConnectionsGauge.WithLabelValues("available").Sub(1)
 	close(c.Messages)
+	c.Unlock()
 }

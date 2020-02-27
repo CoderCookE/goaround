@@ -20,6 +20,7 @@ import (
 
 	"github.com/CoderCookE/goaround/internal/connection"
 	"github.com/CoderCookE/goaround/internal/healthcheck"
+	"github.com/CoderCookE/goaround/internal/stats"
 )
 
 type pool struct {
@@ -122,7 +123,9 @@ func buildCache() (*ristretto.Cache, error) {
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	select {
 	case conn := <-p.connections:
+		stats.AvailableConnectionsGauge.WithLabelValues("available").Sub(1)
 		defer func() {
+			stats.AvailableConnectionsGauge.WithLabelValues("available").Add(1)
 			p.connections <- conn
 		}()
 
@@ -227,6 +230,7 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 				poolConnections = p.addBackend(poolConnections, addedBackend, startup)
 			}
 
+			startup.Wait()
 			shuffle(poolConnections, p.connections)
 		}
 	}

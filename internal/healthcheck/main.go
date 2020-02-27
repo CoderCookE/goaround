@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/CoderCookE/goaround/internal/connection"
+	"github.com/CoderCookE/goaround/internal/stats"
 )
 
 type Reponse struct {
@@ -101,8 +102,17 @@ func (hc *HealthChecker) check(ctx context.Context) {
 	}
 
 	if healthy != hc.currentHealth {
+		go updateStates(healthy)
 		hc.currentHealth = healthy
 		hc.notifySubscribers(healthy, hc.backend, nil)
+	}
+}
+
+func updateStates(healthy bool) {
+	if healthy {
+		stats.HealthGauge.WithLabelValues("healthy").Add(1)
+	} else {
+		stats.HealthGauge.WithLabelValues("healthy").Sub(1)
 	}
 }
 
@@ -118,5 +128,11 @@ func (hc *HealthChecker) notifySubscribers(healthy bool, backend string, proxy *
 }
 
 func (hc *HealthChecker) Shutdown() {
+	message := connection.Message{Shutdown: true}
+
+	for _, c := range hc.subscribers {
+		c <- message
+	}
+
 	close(hc.done)
 }
