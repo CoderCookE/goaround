@@ -36,6 +36,8 @@ sudo ./bin/goaround -p 443 -b http://127.0.0.1:2702 -cacert /Users/ecook/cacert.
 -n max number of connections per backend
 -cacert location of certficate authority cert
 -privkey location of private key
+-cache enabled cache for get requests
+-prometheus-port defaults to 8080
 ```
 
 ## Updating backends via unix socket
@@ -52,8 +54,8 @@ if no flag is passed the service will default to port 3000.
 
 If you pass both a `cacert` and `privkey`, the server will terminate ssl connections.
 
-Backend services are passed via `-b` flags, each backend passed will created a [connection](internal/connection-pool/connection),
-which are managed by a [pool](internal/connection-pool/connection).  The `connections` are pushed into a buffered channel
+Backend services are passed via `-b` flags, each backend passed will created a [connection](internal/connection/main),
+which are managed by a [pool](internal/pool/main).  The `connections` are pushed into a buffered channel
 where they are retrieved when the `Fetch` method is called on the `pool`.  The `Fetch` method will recursively pull connections
 from the channel until a request is completed successfully, or we run out of available connections.
 

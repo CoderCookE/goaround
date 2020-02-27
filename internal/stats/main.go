@@ -1,16 +1,11 @@
 package stats
 
 import (
-	"flag"
 	"log"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-)
-
-var (
-	addr = flag.String("prometheus-listen-address", ":8080", "The address to listen on for HTTP requests.")
 )
 
 var (
@@ -55,13 +50,11 @@ func init() {
 	prometheus.MustRegister(AvailableConnectionsGauge)
 }
 
-func StartUp() {
-	flag.Parse()
-
+func StartUp(addr string) {
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
 		promhttp.HandlerOpts{},
 	))
 
-	log.Fatal(http.ListenAndServe(*addr, nil))
+	log.Fatal(http.ListenAndServe(addr, nil))
 }
