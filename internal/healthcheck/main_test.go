@@ -48,8 +48,10 @@ func TestHealthChecker(t *testing.T) {
 			for {
 				select {
 				case msg = <-resChan:
-					msg.Ack.Done()
-					blocker <- true
+					if !msg.Shutdown {
+						msg.Ack.Done()
+						blocker <- true
+					}
 				}
 			}
 		}()

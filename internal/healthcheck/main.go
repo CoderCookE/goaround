@@ -134,5 +134,6 @@ func (hc *HealthChecker) Shutdown() {
 		c <- message
 	}
 
+	updateStates(false)
 	close(hc.done)
 }

@@ -33,7 +33,6 @@ func main() {
 
 		duration := time.Since(start).Seconds()
 		stats.Durations.WithLabelValues("handle").Observe(duration)
-		log.Printf("Request completed in %v seconds", duration)
 	})
 
 	go stats.StartUp()
@@ -42,7 +41,7 @@ func main() {
 		Addr:         portString,
 		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 20 * time.Second,
+		WriteTimeout: 30 * time.Second,
 	}
 
 	defer server.Close()
