@@ -118,39 +118,35 @@ func buildCache() (*ristretto.Cache, error) {
 //Exported method for passing a request to a connection from the pool
 //Returns a 503 status code if request is unsuccessful
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
-	select {
-	case conn := <-p.connections:
-		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
-		stats.AvailableConnectionsGauge.WithLabelValues("ideal").Sub(1)
-		defer func() {
-			stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
-			if !conn.Shut {
-				p.connections <- conn
-			}
-			stats.AvailableConnectionsGauge.WithLabelValues("ideal").Set(float64(len(p.connections)))
-		}()
+	conn := <-p.connections
+	stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
+	stats.AvailableConnectionsGauge.WithLabelValues("ideal").Sub(1)
+	defer func() {
+		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
+		if !conn.Shut {
+			p.connections <- conn
+		}
+		stats.AvailableConnectionsGauge.WithLabelValues("ideal").Set(float64(len(p.connections)))
+	}()
 
-		if p.cache != nil && r.Method == "GET" {
-			value, found := p.cache.Get(r.URL.Path)
-			if found {
-				stats.CacheCounter.WithLabelValues("hit").Add(1)
-				res := value.(string)
-				w.Write([]byte(res))
-				return
-			}
-
-			stats.CacheCounter.WithLabelValues("miss").Add(1)
+	if p.cache != nil && r.Method == "GET" {
+		value, found := p.cache.Get(r.URL.Path)
+		if found {
+			stats.CacheCounter.WithLabelValues("hit").Add(1)
+			res := value.(string)
+			w.Write([]byte(res))
+			return
 		}
 
-		usableProxy, err := conn.Get()
-		if err != nil {
-			log.Printf("retrying err with request: %s", err.Error())
-			p.Fetch(w, r)
-		} else {
-			usableProxy.ServeHTTP(w, r)
-		}
-	default:
-		w.WriteHeader(http.StatusServiceUnavailable)
+		stats.CacheCounter.WithLabelValues("miss").Add(1)
+	}
+
+	usableProxy, err := conn.Get()
+	if err != nil {
+		log.Printf("retrying err with request: %s", err.Error())
+		p.Fetch(w, r)
+	} else {
+		usableProxy.ServeHTTP(w, r)
 	}
 }
 
