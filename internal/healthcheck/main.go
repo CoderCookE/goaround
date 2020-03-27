@@ -77,7 +77,7 @@ func (hc *HealthChecker) Reuse(newBackend string, proxy *httputil.ReverseProxy) 
 
 func (hc *HealthChecker) check(ctx context.Context) {
 	url := fmt.Sprintf("%s%s", hc.backend, "/health")
-	healthy := hc.currentHealth
+	var healthy bool
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -95,9 +95,14 @@ func (hc *HealthChecker) check(ctx context.Context) {
 			healthy = false
 		} else {
 			healthCheck := &Reponse{}
-			json.Unmarshal(body, healthCheck)
+			err := json.Unmarshal(body, healthCheck)
 
-			healthy = healthCheck.State == "healthy" || (resp.StatusCode == 200 && healthCheck.State != "degraded")
+			if err != nil {
+				log.Printf("Error reading backend response, defaulting to Status Code, backend: %s, error %s", hc.backend, err.Error())
+				healthy = resp.StatusCode == 200
+			} else {
+				healthy = healthCheck.State == "healthy" || (resp.StatusCode == 200 && healthCheck.State != "degraded")
+			}
 		}
 	}
 
