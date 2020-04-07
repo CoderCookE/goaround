@@ -2,10 +2,9 @@
 [![Maintainability](https://api.codeclimate.com/v1/badges/60d01111dd41a66baae3/maintainability)](https://codeclimate.com/github/CoderCookE/goaround/maintainability)
 
 # GoAround
-A simple HTTP load balancer that
-is capable of managing multiple server instances in a pool and balancing the
-incoming requests across those instances. If no backend instances are available
-a 503 error will be returned.
+HTTP load balancer that is capable of managing multiple server instances in a pool
+and balancing the incoming requests across those instances. If no backend instances
+are available a 503 error will be returned.
 
 ## Make file
 
