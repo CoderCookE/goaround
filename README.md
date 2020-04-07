@@ -1,4 +1,5 @@
 [![Build Status](https://travis-ci.org/CoderCookE/goaround.svg?branch=master)](https://travis-ci.org/CoderCookE/goaround)
+[![Maintainability](https://api.codeclimate.com/v1/badges/60d01111dd41a66baae3/maintainability)](https://codeclimate.com/github/CoderCookE/goaround/maintainability)
 
 # GoAround
 A simple HTTP load balancer that
