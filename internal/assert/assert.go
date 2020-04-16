@@ -25,6 +25,14 @@ func (a *Asserter) Equal(actual, expected interface{}) {
 	}
 }
 
+func (a *Asserter) StringContains(actual, expected string) {
+	a.T.Helper()
+	if !strings.Contains(actual, expected) {
+		message := fmt.Sprintf("expected: %s was not contained in actual: %s", expected, actual)
+		a.T.Error(message)
+	}
+}
+
 func (a *Asserter) NotEqual(actual, expected interface{}) {
 	a.T.Helper()
 

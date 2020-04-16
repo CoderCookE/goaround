@@ -1,6 +1,8 @@
 package gracefulserver
 
 import (
+	"bytes"
+	"log"
 	"net/http"
 	"os"
 	"syscall"
@@ -22,6 +24,12 @@ func TestListenAndServe(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
 	t.Run("gracefully shutsdown", func(t *testing.T) {
+		var buf bytes.Buffer
+		log.SetOutput(&buf)
+		defer func() {
+			log.SetOutput(os.Stderr)
+		}()
+
 		done := make(chan struct{})
 		server := New(&http.Server{
 			Addr:        ":9999",
@@ -44,7 +52,8 @@ func TestListenAndServe(t *testing.T) {
 
 		err = process.Signal(syscall.SIGTERM)
 		assertion.Equal(err, nil)
-
 		<-done
+
+		assertion.StringContains(buf.String(), "Graceful shutdown complete")
 	})
 }
