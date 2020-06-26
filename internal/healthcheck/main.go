@@ -42,23 +42,22 @@ func New(client *http.Client, subscribers []chan connection.Message, backend str
 }
 
 func (hc *HealthChecker) Start(startup *sync.WaitGroup) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	bg := context.Background()
+	timeout := 1000 * time.Millisecond
+	deadline := time.Now().Add(timeout)
 	startup.Done()
 
-	hc.Lock()
-	hc.check(ctx)
-	hc.Unlock()
+	ctx, cancel := context.WithDeadline(bg, deadline)
+	hc.check(ctx, cancel)
 
-	ticker := time.NewTicker(1000 * time.Millisecond)
+	ticker := time.NewTicker(timeout)
 	for {
 		select {
-		case <-ticker.C:
-			cancel()
-			hc.Lock()
-			ctx, cancel = context.WithCancel(context.Background())
-			hc.check(ctx)
-			hc.Unlock()
+		case <-ctx.Done():
+			<-ticker.C
+			deadline := time.Now().Add(timeout)
+			ctx, cancel = context.WithDeadline(bg, deadline)
+			hc.check(ctx, cancel)
 		case <-hc.done:
 			ticker.Stop()
 			return
@@ -75,7 +74,11 @@ func (hc *HealthChecker) Reuse(newBackend string, proxy *httputil.ReverseProxy) 
 	return hc
 }
 
-func (hc *HealthChecker) check(ctx context.Context) {
+func (hc *HealthChecker) check(ctx context.Context, cancel context.CancelFunc) {
+	hc.Lock()
+	defer hc.Unlock()
+	defer cancel()
+
 	url := fmt.Sprintf("%s%s", hc.backend, "/health")
 	var healthy bool
 
