@@ -49,7 +49,7 @@ func TestHealthChecker(t *testing.T) {
 		blocker := make(chan bool, 1)
 		var msg connection.Message
 		go func() {
-			for msg := range resChan {
+			for msg = range resChan {
 				if !msg.Shutdown {
 					msg.Ack.Done()
 					blocker <- true
