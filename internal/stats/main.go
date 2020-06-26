@@ -66,9 +66,9 @@ func StartUp(addr string) {
 	}
 
 	graceful := gracefulserver.New(server)
-	log.Printf("Starting Promethus server on port %s", addr)
+	log.Printf("Starting Prometheus server on port %s", addr)
 	err := graceful.ListenAndServe()
 	if err != nil {
-		log.Printf("Errors starting Prometheus server", err.Error())
+		log.Printf("Errors starting Prometheus serve: %s", err.Error())
 	}
 }
