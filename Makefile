@@ -6,6 +6,12 @@ RELEASE=$$(git rev-parse HEAD)
 
 default: bin
 
+lint:
+	golangci-lint run
+
+lint-fix:
+	golangci-lint run --fix
+
 bin:
 	mkdir -p bin
 	cd ./ && go build -o ./bin/$(APP_NAME)

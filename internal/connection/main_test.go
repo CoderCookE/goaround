@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -14,18 +15,21 @@ import (
 )
 
 func TestConnection(t *testing.T) {
+	assertion := &assert.Asserter{T: t}
+
 	tr := &http.Transport{
 		MaxIdleConns:    10,
 		IdleConnTimeout: 1 * time.Second,
 	}
 
 	availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var message []byte
-		message = []byte("hello")
-		w.Write(message)
-	})
+		message := []byte("hello")
 
-	assertion := &assert.Asserter{T: t}
+		_, err := w.Write(message)
+		if err != nil {
+			log.Printf("Error writing: %s", err.Error())
+		}
+	})
 
 	t.Run("When get is called on a healthy connection", func(t *testing.T) {
 		availableServer := httptest.NewServer(availableHandler)

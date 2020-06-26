@@ -132,7 +132,10 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 		if found {
 			stats.CacheCounter.WithLabelValues("hit").Add(1)
 			res := value.(string)
-			w.Write([]byte(res))
+			_, err := w.Write([]byte(res))
+			if err != nil {
+				log.Printf("Error writing: %s", err.Error())
+			}
 			return
 		}
 

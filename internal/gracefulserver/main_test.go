@@ -17,7 +17,10 @@ func TestMain(m *testing.M) {
 }
 
 func testHandler(rw http.ResponseWriter, req *http.Request) {
-	rw.Write([]byte("ok"))
+	_, err := rw.Write([]byte("ok"))
+	if err != nil {
+		log.Printf("Error writing: %s", err.Error())
+	}
 }
 
 func TestListenAndServe(t *testing.T) {
