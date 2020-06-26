@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/CoderCookE/goaround/internal/customflags"
+	"github.com/CoderCookE/goaround/internal/gracefulserver"
 	"github.com/CoderCookE/goaround/internal/pool"
 	"github.com/CoderCookE/goaround/internal/stats"
 )
@@ -46,11 +47,12 @@ func main() {
 
 	defer server.Close()
 
+	graceful := gracefulserver.New(server)
 	var err error
 	if *cacert != "" && *privkey != "" {
-		err = server.ListenAndServeTLS(*cacert, *privkey)
+		err = graceful.ListenAndServeTLS(*cacert, *privkey)
 	} else {
-		err = server.ListenAndServe()
+		err = graceful.ListenAndServe()
 	}
 
 	if err != nil {
