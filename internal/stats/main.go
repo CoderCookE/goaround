@@ -3,7 +3,9 @@ package stats
 import (
 	"log"
 	"net/http"
+	"time"
 
+	"github.com/CoderCookE/goaround/internal/gracefulserver"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -51,10 +53,22 @@ func init() {
 }
 
 func StartUp(addr string) {
-	http.Handle("/metrics", promhttp.HandlerFor(
+	handler := promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
 		promhttp.HandlerOpts{},
-	))
+	)
 
-	log.Fatal(http.ListenAndServe(addr, nil))
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      handler,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+	}
+
+	graceful := gracefulserver.New(server)
+	log.Printf("Starting Promethus server on port %s", addr)
+	err := graceful.ListenAndServe()
+	if err != nil {
+		log.Printf("Errors starting Prometheus server", err.Error())
+	}
 }
