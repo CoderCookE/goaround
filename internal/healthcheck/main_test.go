@@ -2,6 +2,7 @@ package healthcheck
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -27,7 +28,10 @@ func TestHealthChecker(t *testing.T) {
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			healthReponse := &Reponse{State: "healthy", Message: ""}
 			healthMessage, _ := json.Marshal(healthReponse)
-			w.Write(healthMessage)
+			_, err := w.Write(healthMessage)
+			if err != nil {
+				log.Printf("Error writing: %s", err.Error())
+			}
 		})
 
 		availableServer := httptest.NewServer(availableHandler)
@@ -45,18 +49,15 @@ func TestHealthChecker(t *testing.T) {
 		blocker := make(chan bool, 1)
 		var msg connection.Message
 		go func() {
-			for {
-				select {
-				case msg = <-resChan:
-					if !msg.Shutdown {
-						msg.Ack.Done()
-						blocker <- true
-					}
+			for msg = range resChan {
+				if !msg.Shutdown {
+					msg.Ack.Done()
+					blocker <- true
 				}
 			}
 		}()
 
-		hc = hc.Reuse("foobar", nil)
+		_ = hc.Reuse("foobar", nil)
 
 		<-blocker
 		assertion.Equal(msg.Health, false)
@@ -69,7 +70,10 @@ func TestHealthChecker(t *testing.T) {
 		availableHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			healthReponse := &Reponse{State: "healthy", Message: ""}
 			healthMessage, _ := json.Marshal(healthReponse)
-			w.Write(healthMessage)
+			_, err := w.Write(healthMessage)
+			if err != nil {
+				log.Printf("Error writing: %s", err.Error())
+			}
 		})
 
 		availableServer := httptest.NewServer(availableHandler)
@@ -98,7 +102,10 @@ func TestHealthChecker(t *testing.T) {
 		degradedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			healthReponse := &Reponse{State: "degraded", Message: ""}
 			healthMessage, _ := json.Marshal(healthReponse)
-			w.Write(healthMessage)
+			_, err := w.Write(healthMessage)
+			if err != nil {
+				log.Printf("Error writing: %s", err.Error())
+			}
 		})
 
 		degradedServer := httptest.NewServer(degradedHandler)

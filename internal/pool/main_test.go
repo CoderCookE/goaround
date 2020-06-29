@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -29,7 +30,6 @@ func waitForHealthCheck(connectionPool *pool, server string) {
 	}
 
 	hc.Wg.Wait()
-	return
 }
 
 func TestFetch(t *testing.T) {
@@ -66,7 +66,10 @@ func TestFetch(t *testing.T) {
 					message = []byte("hello")
 				}
 
-				w.Write(message)
+				_, err := w.Write(message)
+				if err != nil {
+					log.Printf("Error writing: %s", err.Error())
+				}
 
 				go func() {
 					time.Sleep(1 * time.Second)
@@ -120,7 +123,11 @@ func TestFetch(t *testing.T) {
 					message = []byte("hello")
 				}
 
-				w.Write(message)
+				_, err := w.Write(message)
+				if err != nil {
+					log.Printf("Error writing: %s", err.Error())
+				}
+
 				go func() {
 					time.Sleep(1 * time.Second)
 					blocker <- true
@@ -173,7 +180,11 @@ func TestFetch(t *testing.T) {
 					message = []byte("hello")
 				}
 
-				w.Write(message)
+				_, err := w.Write(message)
+				if err != nil {
+					log.Printf("Error writing: %s", err.Error())
+				}
+
 				go func() {
 					time.Sleep(1 * time.Second)
 					blocker <- true
@@ -229,7 +240,10 @@ func TestFetch(t *testing.T) {
 				message = []byte("bar")
 			}
 
-			w.Write(message)
+			_, err := w.Write(message)
+			if err != nil {
+				log.Printf("Error writing: %s", err.Error())
+			}
 			go func() {
 				time.Sleep(1 * time.Second)
 				blocker <- true

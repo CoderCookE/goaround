@@ -51,29 +51,25 @@ func (c *Connection) Get() (*httputil.ReverseProxy, error) {
 }
 
 func (c *Connection) healthCheck() {
-	for {
-		select {
-		case msg := <-c.Messages:
-			c.Lock()
-			if msg.Shutdown {
-				c.Shutdown()
-				c.Unlock()
-				return
-			} else {
-				backend := msg.Backend
-				c.healthy = msg.Health
-				proxy := msg.Proxy
-
-				if proxy != nil && c.Backend != backend {
-					c.Backend = backend
-					c.proxy = proxy
-				}
-
-			}
-
-			msg.Ack.Done()
+	for msg := range c.Messages {
+		c.Lock()
+		if msg.Shutdown {
+			c.Shutdown()
 			c.Unlock()
+			return
+		} else {
+			backend := msg.Backend
+			c.healthy = msg.Health
+			proxy := msg.Proxy
+
+			if proxy != nil && c.Backend != backend {
+				c.Backend = backend
+				c.proxy = proxy
+			}
 		}
+
+		msg.Ack.Done()
+		c.Unlock()
 	}
 }
 
