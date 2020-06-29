@@ -44,10 +44,8 @@ func New(client *http.Client, subscribers []chan connection.Message, backend str
 func (hc *HealthChecker) Start(startup *sync.WaitGroup) {
 	bg := context.Background()
 	timeout := 1000 * time.Millisecond
-	deadline := time.Now().Add(timeout)
 	startup.Done()
-
-	ctx, cancel := context.WithDeadline(bg, deadline)
+	ctx, cancel := context.WithTimeout(bg, timeout)
 	hc.check(ctx, cancel)
 
 	ticker := time.NewTicker(timeout)
@@ -55,8 +53,7 @@ func (hc *HealthChecker) Start(startup *sync.WaitGroup) {
 		select {
 		case <-ctx.Done():
 			<-ticker.C
-			deadline := time.Now().Add(timeout)
-			ctx, cancel = context.WithDeadline(bg, deadline)
+			ctx, cancel = context.WithTimeout(bg, timeout)
 			hc.check(ctx, cancel)
 		case <-hc.done:
 			ticker.Stop()
