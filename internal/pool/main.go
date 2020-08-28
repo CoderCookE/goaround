@@ -124,11 +124,14 @@ func buildCache(cacheEnabled bool) (*ristretto.Cache, error) {
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	start := time.Now()
 
 	var conn *connection.Connection
 	for {
 		select {
 		case conn = <-p.connections:
+			duration := time.Since(start).Seconds()
+			stats.Durations.WithLabelValues("get_connection").Observe(duration)
 			stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
 
 			defer func() {
@@ -163,8 +166,9 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		case <-ticker.C:
-			stats.RequestCounter.WithLabelValues("no_connections").Add(1)
+			stats.RequestCounter.WithLabelValues("no_connection").Add(1)
 			w.WriteHeader(http.StatusGatewayTimeout)
+			w.Write([]byte("Gateway Timeout"))
 			return
 		}
 	}
@@ -220,7 +224,9 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 					} else {
 						proxy := httputil.NewSingleHostReverseProxy(endpoint)
 						proxy.Transport = p.client.Transport
+						proxy.ErrorHandler = errorHandler
 						p.setupCache(proxy)
+
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
 						p.healthChecks[new] = newHC
 					}
@@ -277,6 +283,7 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 		log.Printf("error parsing backend url: %s", backend)
 	} else {
 		proxy := httputil.NewSingleHostReverseProxy(endpoint)
+		proxy.ErrorHandler = errorHandler
 		proxy.Transport = p.client.Transport
 		p.setupCache(proxy)
 
@@ -302,6 +309,11 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 
 	startup.Wait()
 	return connections
+}
+
+func errorHandler(w http.ResponseWriter, r *http.Request, e error) {
+	stats.RequestCounter.WithLabelValues("http_error").Add(1)
+	return
 }
 
 func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
