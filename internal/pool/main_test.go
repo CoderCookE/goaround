@@ -1,6 +1,7 @@
 package pool
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -8,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +33,52 @@ func waitForHealthCheck(connectionPool *pool, server string) {
 	}
 
 	hc.Wg.Wait()
+}
+
+func TestSetupCache(t *testing.T) {
+	assertion := &assert.Asserter{T: t}
+
+	t.Run("It updates the ModifyResponse method", func(t *testing.T) {
+		backends := []string{"http://www.foo.com"}
+		config := &Config{
+			Backends:    backends,
+			NumConns:    10,
+			EnableCache: false,
+		}
+
+		endpoint, err := url.ParseRequestURI(backends[0])
+		assertion.Equal(err, nil)
+
+		connectionPool := New(config)
+		proxy := httputil.NewSingleHostReverseProxy(endpoint)
+
+		value, found := connectionPool.cache.Get("/foo")
+		assertion.Equal(found, false)
+		assertion.Equal(value, nil)
+		connectionPool.setupCache(proxy)
+
+		req, _ := http.NewRequest("GET", "http://example.com/foo", nil)
+		res := &http.Response{Request: req, Body: ioutil.NopCloser(bytes.NewBufferString("bar"))}
+		err = proxy.ModifyResponse(res)
+		assertion.Equal(err, nil)
+
+		value, found = connectionPool.cache.Get("/foo")
+
+		breaker := !found
+		ticker := time.NewTicker(500 * time.Millisecond)
+		for breaker {
+			select {
+			case <-ticker.C:
+				breaker = false
+			default:
+				value, found = connectionPool.cache.Get("/foo")
+				breaker = !found
+			}
+		}
+
+		assertion.Equal(value, "bar")
+		assertion.Equal(found, true)
+	})
 }
 
 func TestFetch(t *testing.T) {

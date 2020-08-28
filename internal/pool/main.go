@@ -195,29 +195,16 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 				if len(added) > 0 {
 					var new string
 					new, added = added[0], added[1:]
-					url, err := url.ParseRequestURI(new)
+					endpoint, err := url.ParseRequestURI(new)
 					if err != nil {
 						log.Printf("Error adding backend, %s", new)
 					} else {
-						proxy := httputil.NewSingleHostReverseProxy(url)
+						proxy := httputil.NewSingleHostReverseProxy(endpoint)
 						proxy.Transport = p.client.Transport
 
 						if p.cacheEnabled {
-							cacheResponse := func(r *http.Response) error {
-								body, err := ioutil.ReadAll(r.Body)
-								cacheable := string(body)
-								r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-
-								path := r.Request.URL.Path
-								if err == nil {
-									p.cache.Set(path, cacheable, 1)
-								}
-
-								return nil
-							}
-							proxy.ModifyResponse = cacheResponse
+							p.setupCache(proxy)
 						}
-
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
 						p.healthChecks[new] = newHC
 					}
@@ -269,28 +256,15 @@ func difference(original []string, updated []string) (added []string, removed []
 }
 
 func (p *pool) addBackend(connections []*connection.Connection, backend string, startup *sync.WaitGroup) []*connection.Connection {
-	url, err := url.ParseRequestURI(backend)
+	endpoint, err := url.ParseRequestURI(backend)
 	if err != nil {
 		log.Printf("error parsing backend url: %s", backend)
 	} else {
-		proxy := httputil.NewSingleHostReverseProxy(url)
+		proxy := httputil.NewSingleHostReverseProxy(endpoint)
 		proxy.Transport = p.client.Transport
 
 		if p.cacheEnabled {
-			cacheResponse := func(r *http.Response) error {
-				body, err := ioutil.ReadAll(r.Body)
-				cacheable := string(body)
-				r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-
-				path := r.Request.URL.Path
-				if err == nil {
-					p.cache.Set(path, cacheable, 1)
-				}
-
-				return nil
-			}
-
-			proxy.ModifyResponse = cacheResponse
+			p.setupCache(proxy)
 		}
 
 		backendConnections := make([]chan connection.Message, p.connsPerBackend)
@@ -315,4 +289,21 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 
 	startup.Wait()
 	return connections
+}
+
+func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
+	cacheResponse := func(r *http.Response) error {
+		body, err := ioutil.ReadAll(r.Body)
+		cacheable := string(body)
+		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+		path := r.Request.URL.Path
+		if err == nil {
+			p.cache.Set(path, cacheable, 1)
+		}
+
+		return nil
+	}
+
+	proxy.ModifyResponse = cacheResponse
 }
