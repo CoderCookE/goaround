@@ -62,8 +62,17 @@ func TestSetupCache(t *testing.T) {
 		err = proxy.ModifyResponse(res)
 		assertion.Equal(err, nil)
 
-		time.Sleep(10 * time.Millisecond)
 		value, found = connectionPool.cache.Get("/foo")
+		ticker := time.NewTicker(500 * time.Millisecond)
+		for found != true {
+			select {
+			case <-ticker.C:
+				break
+			default:
+				value, found = connectionPool.cache.Get("/foo")
+			}
+		}
+
 		assertion.Equal(value, "bar")
 		assertion.Equal(found, true)
 	})
