@@ -54,11 +54,13 @@ func TestSetupCache(t *testing.T) {
 
 		value, found := connectionPool.cache.Get("/foo")
 		assertion.Equal(found, false)
+		assertion.Equal(value, nil)
 		connectionPool.setupCache(proxy)
 
 		req, _ := http.NewRequest("GET", "http://example.com/foo", nil)
 		res := &http.Response{Request: req, Body: ioutil.NopCloser(bytes.NewBufferString("bar"))}
-		proxy.ModifyResponse(res)
+		err = proxy.ModifyResponse(res)
+		assertion.Equal(err, nil)
 
 		time.Sleep(10 * time.Millisecond)
 		value, found = connectionPool.cache.Get("/foo")
