@@ -63,13 +63,16 @@ func TestSetupCache(t *testing.T) {
 		assertion.Equal(err, nil)
 
 		value, found = connectionPool.cache.Get("/foo")
+
+		breaker := !found
 		ticker := time.NewTicker(500 * time.Millisecond)
-		for found != true {
+		for breaker {
 			select {
 			case <-ticker.C:
-				break
+				breaker = false
 			default:
 				value, found = connectionPool.cache.Get("/foo")
+				breaker = !found
 			}
 		}
 
