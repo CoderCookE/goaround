@@ -55,6 +55,9 @@ func TestSetupCache(t *testing.T) {
 		value, found := connectionPool.cache.Get("/foo")
 		assertion.Equal(found, false)
 		assertion.Equal(value, nil)
+
+		cache, _ := buildCache(true)
+		connectionPool.cache = cache
 		connectionPool.setupCache(proxy)
 
 		req, _ := http.NewRequest("GET", "http://example.com/foo", nil)
@@ -84,7 +87,7 @@ func TestSetupCache(t *testing.T) {
 func TestFetch(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
-	t.Run("Creates connections", func(t *testing.T) {
+	t.Run("creates connections", func(t *testing.T) {
 		backends := []string{"http://www.foo.com"}
 
 		config := &Config{
@@ -97,8 +100,8 @@ func TestFetch(t *testing.T) {
 		assertion.Equal(len(connectionPool.connections), config.NumConns)
 	})
 
-	t.Run("With cache", func(t *testing.T) {
-		t.Run("Fetches from cache", func(t *testing.T) {
+	t.Run("with cache", func(t *testing.T) {
+		t.Run("fetches from cache", func(t *testing.T) {
 			var callCount int
 			blocker := make(chan bool)
 

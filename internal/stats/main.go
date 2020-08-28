@@ -28,6 +28,14 @@ var (
 		[]string{"cache"},
 	)
 
+	RequestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "request",
+			Help: "requests",
+		},
+		[]string{"request"},
+	)
+
 	HealthGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "backends",
@@ -50,6 +58,7 @@ func init() {
 	prometheus.MustRegister(CacheCounter)
 	prometheus.MustRegister(HealthGauge)
 	prometheus.MustRegister(AvailableConnectionsGauge)
+	prometheus.MustRegister(RequestCounter)
 }
 
 func StartUp(addr string) {

@@ -64,7 +64,7 @@ func New(c *Config) *pool {
 
 	var cache *ristretto.Cache
 	var err error
-	if cache, err = buildCache(); err != nil {
+	if cache, err = buildCache(cacheEnabled); err != nil {
 		log.Printf("Error creating cache: %v", err)
 		cacheEnabled = false
 	}
@@ -105,7 +105,11 @@ func shuffle(conns []*connection.Connection, ch chan *connection.Connection) {
 	}
 }
 
-func buildCache() (*ristretto.Cache, error) {
+func buildCache(cacheEnabled bool) (*ristretto.Cache, error) {
+	if !cacheEnabled {
+		return nil, nil
+	}
+
 	cache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,     // number of keys to track frequency of (10M).
 		MaxCost:     1 << 30, // maximum cost of cache (1GB).
@@ -118,36 +122,51 @@ func buildCache() (*ristretto.Cache, error) {
 //Exported method for passing a request to a connection from the pool
 //Returns a 503 status code if request is unsuccessful
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
-	conn := <-p.connections
-	stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
-	defer func() {
-		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
-		if !conn.Shut {
-			p.connections <- conn
-		}
-	}()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
-	if p.cache != nil && r.Method == "GET" {
-		value, found := p.cache.Get(r.URL.Path)
-		if found {
-			stats.CacheCounter.WithLabelValues("hit").Add(1)
-			res := value.(string)
-			_, err := w.Write([]byte(res))
+	var conn *connection.Connection
+	for {
+		select {
+		case conn = <-p.connections:
+			stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
+
+			defer func() {
+				stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
+				if !conn.Shut {
+					p.connections <- conn
+				}
+			}()
+
+			if p.cache != nil && r.Method == "GET" {
+				value, found := p.cache.Get(r.URL.Path)
+				if found {
+					stats.CacheCounter.WithLabelValues("hit").Add(1)
+					res := value.(string)
+					_, err := w.Write([]byte(res))
+					if err != nil {
+						log.Printf("Error writing: %s", err.Error())
+					}
+					return
+				}
+
+				stats.CacheCounter.WithLabelValues("miss").Add(1)
+			}
+
+			usableProxy, err := conn.Get()
 			if err != nil {
-				log.Printf("Error writing: %s", err.Error())
+				log.Printf("retrying err with request: %s", err.Error())
+				stats.RequestCounter.WithLabelValues("retry").Add(1)
+				p.Fetch(w, r)
+			} else {
+				usableProxy.ServeHTTP(w, r)
 			}
 			return
+		case <-ticker.C:
+			stats.RequestCounter.WithLabelValues("no_connections").Add(1)
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
 		}
-
-		stats.CacheCounter.WithLabelValues("miss").Add(1)
-	}
-
-	usableProxy, err := conn.Get()
-	if err != nil {
-		log.Printf("retrying err with request: %s", err.Error())
-		p.Fetch(w, r)
-	} else {
-		usableProxy.ServeHTTP(w, r)
 	}
 }
 
@@ -201,10 +220,7 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 					} else {
 						proxy := httputil.NewSingleHostReverseProxy(endpoint)
 						proxy.Transport = p.client.Transport
-
-						if p.cacheEnabled {
-							p.setupCache(proxy)
-						}
+						p.setupCache(proxy)
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
 						p.healthChecks[new] = newHC
 					}
@@ -262,10 +278,7 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 	} else {
 		proxy := httputil.NewSingleHostReverseProxy(endpoint)
 		proxy.Transport = p.client.Transport
-
-		if p.cacheEnabled {
-			p.setupCache(proxy)
-		}
+		p.setupCache(proxy)
 
 		backendConnections := make([]chan connection.Message, p.connsPerBackend)
 		for i := 0; i < p.connsPerBackend; i++ {
@@ -292,18 +305,20 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 }
 
 func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
-	cacheResponse := func(r *http.Response) error {
-		body, err := ioutil.ReadAll(r.Body)
-		cacheable := string(body)
-		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+	if p.cache != nil {
+		cacheResponse := func(r *http.Response) error {
+			body, err := ioutil.ReadAll(r.Body)
+			cacheable := string(body)
+			r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 
-		path := r.Request.URL.Path
-		if err == nil {
-			p.cache.Set(path, cacheable, 1)
+			path := r.Request.URL.Path
+			if err == nil {
+				p.cache.Set(path, cacheable, 1)
+			}
+
+			return nil
 		}
 
-		return nil
+		proxy.ModifyResponse = cacheResponse
 	}
-
-	proxy.ModifyResponse = cacheResponse
 }
