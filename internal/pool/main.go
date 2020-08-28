@@ -195,11 +195,11 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 				if len(added) > 0 {
 					var new string
 					new, added = added[0], added[1:]
-					url, err := url.ParseRequestURI(new)
+					endpoint, err := url.ParseRequestURI(new)
 					if err != nil {
 						log.Printf("Error adding backend, %s", new)
 					} else {
-						proxy := httputil.NewSingleHostReverseProxy(url)
+						proxy := httputil.NewSingleHostReverseProxy(endpoint)
 						proxy.Transport = p.client.Transport
 
 						if p.cacheEnabled {
@@ -256,11 +256,11 @@ func difference(original []string, updated []string) (added []string, removed []
 }
 
 func (p *pool) addBackend(connections []*connection.Connection, backend string, startup *sync.WaitGroup) []*connection.Connection {
-	url, err := url.ParseRequestURI(backend)
+	endpoint, err := url.ParseRequestURI(backend)
 	if err != nil {
 		log.Printf("error parsing backend url: %s", backend)
 	} else {
-		proxy := httputil.NewSingleHostReverseProxy(url)
+		proxy := httputil.NewSingleHostReverseProxy(endpoint)
 		proxy.Transport = p.client.Transport
 
 		if p.cacheEnabled {
