@@ -203,21 +203,8 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 						proxy.Transport = p.client.Transport
 
 						if p.cacheEnabled {
-							cacheResponse := func(r *http.Response) error {
-								body, err := ioutil.ReadAll(r.Body)
-								cacheable := string(body)
-								r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-
-								path := r.Request.URL.Path
-								if err == nil {
-									p.cache.Set(path, cacheable, 1)
-								}
-
-								return nil
-							}
-							proxy.ModifyResponse = cacheResponse
+							p.setupCache(proxy)
 						}
-
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
 						p.healthChecks[new] = newHC
 					}
@@ -277,20 +264,7 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 		proxy.Transport = p.client.Transport
 
 		if p.cacheEnabled {
-			cacheResponse := func(r *http.Response) error {
-				body, err := ioutil.ReadAll(r.Body)
-				cacheable := string(body)
-				r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-
-				path := r.Request.URL.Path
-				if err == nil {
-					p.cache.Set(path, cacheable, 1)
-				}
-
-				return nil
-			}
-
-			proxy.ModifyResponse = cacheResponse
+			p.setupCache(proxy)
 		}
 
 		backendConnections := make([]chan connection.Message, p.connsPerBackend)
@@ -315,4 +289,21 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 
 	startup.Wait()
 	return connections
+}
+
+func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
+	cacheResponse := func(r *http.Response) error {
+		body, err := ioutil.ReadAll(r.Body)
+		cacheable := string(body)
+		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+		path := r.Request.URL.Path
+		if err == nil {
+			p.cache.Set(path, cacheable, 1)
+		}
+
+		return nil
+	}
+
+	proxy.ModifyResponse = cacheResponse
 }
