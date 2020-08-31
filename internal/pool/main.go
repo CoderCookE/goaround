@@ -3,6 +3,7 @@ package pool
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -31,6 +32,7 @@ type pool struct {
 	client          *http.Client
 	connsPerBackend int
 	cache           *ristretto.Cache
+	retryWG         *sync.WaitGroup
 }
 
 //Exported method for creation of a connection-pool takes []string
@@ -69,6 +71,7 @@ func New(c *Config) *pool {
 		client:          client,
 		connsPerBackend: connsPerBackend,
 		cache:           cache,
+		retryWG:         &sync.WaitGroup{},
 	}
 
 	poolConnections := []*connection.Connection{}
@@ -118,11 +121,24 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	conn := <-p.connections
 
+	ctxAttempt := r.Context().Value("attempts")
+	var attempt int
+	if ctxAttempt != nil {
+		attempt = ctxAttempt.(int)
+	}
+	if attempt > 1 {
+		p.retryWG.Done()
+	}
+
 	duration := time.Since(start).Seconds()
 	stats.Durations.WithLabelValues("get_connection").Observe(duration)
 	stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
 	defer func() {
 		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
+		stats.Attempts.WithLabelValues().Observe(float64(attempt))
+		duration = time.Since(start).Seconds()
+		stats.Durations.WithLabelValues("return_connection").Observe(duration)
+
 		if !conn.Shut {
 			p.connections <- conn
 		}
@@ -291,8 +307,14 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 
 func (p *pool) errorHandler(w http.ResponseWriter, r *http.Request, e error) {
 	host := fmt.Sprintf("%s:%s", r.URL.Hostname(), r.URL.Port())
+
 	stats.RequestCounter.WithLabelValues(host, "backend_error").Add(1)
-	p.Fetch(w, r)
+
+	attempts := r.Context().Value("attempts").(int) + 1
+	p.retryWG.Add(1)
+	ctx := context.WithValue(r.Context(), "attempts", attempts)
+
+	p.Fetch(w, r.WithContext(ctx))
 }
 
 func (p *pool) setupCache(proxy *httputil.ReverseProxy) {

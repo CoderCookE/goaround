@@ -20,6 +20,15 @@ var (
 		[]string{"stage"},
 	)
 
+	Attempts = prometheus.NewSummaryVec(
+		prometheus.SummaryOpts{
+			Name:       "attempts",
+			Help:       "distributions of number of attempts made",
+			Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001, 1.0: 0.0},
+		},
+		[]string{},
+	)
+
 	CacheCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "cache",
@@ -54,6 +63,7 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(Attempts)
 	prometheus.MustRegister(Durations)
 	prometheus.MustRegister(CacheCounter)
 	prometheus.MustRegister(HealthGauge)

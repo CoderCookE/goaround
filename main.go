@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -30,8 +31,9 @@ func main() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		defer r.Body.Close()
+		ctx := context.WithValue(context.Background(), "attempts", 1)
 
-		connectionPool.Fetch(w, r)
+		connectionPool.Fetch(w, r.WithContext(ctx))
 
 		duration := time.Since(start).Seconds()
 		stats.Durations.WithLabelValues("handle").Observe(duration)
