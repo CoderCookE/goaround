@@ -54,11 +54,11 @@ func New(c *Config) *pool {
 		}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 10 * time.Second,
-		ResponseHeaderTimeout: 60 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 	}
 
 	client := &http.Client{
-		Timeout:   60 * time.Second,
+		Timeout:   30 * time.Second,
 		Transport: tr,
 	}
 
@@ -122,55 +122,40 @@ func buildCache(cacheEnabled bool) (*ristretto.Cache, error) {
 //Exported method for passing a request to a connection from the pool
 //Returns a 503 status code if request is unsuccessful
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
 	start := time.Now()
+	conn := <-p.connections
 
-	var conn *connection.Connection
-	for {
-		select {
-		case conn = <-p.connections:
-			duration := time.Since(start).Seconds()
-			stats.Durations.WithLabelValues("get_connection").Observe(duration)
-			stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
+	duration := time.Since(start).Seconds()
+	stats.Durations.WithLabelValues("get_connection").Observe(duration)
+	stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
+	defer func() {
+		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
+		if !conn.Shut {
+			p.connections <- conn
+		}
+	}()
 
-			defer func() {
-				stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
-				if !conn.Shut {
-					p.connections <- conn
-				}
-			}()
-
-			if p.cache != nil && r.Method == "GET" {
-				value, found := p.cache.Get(r.URL.Path)
-				if found {
-					stats.CacheCounter.WithLabelValues("hit").Add(1)
-					res := value.(string)
-					_, err := w.Write([]byte(res))
-					if err != nil {
-						log.Printf("Error writing: %s", err.Error())
-					}
-					return
-				}
-
-				stats.CacheCounter.WithLabelValues("miss").Add(1)
-			}
-
-			usableProxy, err := conn.Get()
+	if p.cache != nil && r.Method == "GET" {
+		value, found := p.cache.Get(r.URL.Path)
+		if found {
+			stats.CacheCounter.WithLabelValues("hit").Add(1)
+			res := value.(string)
+			_, err := w.Write([]byte(res))
 			if err != nil {
-				log.Printf("retrying err with request: %s", err.Error())
-				stats.RequestCounter.WithLabelValues("retry").Add(1)
-				p.Fetch(w, r)
-			} else {
-				usableProxy.ServeHTTP(w, r)
+				log.Printf("Error writing: %s", err.Error())
 			}
-			return
-		case <-ticker.C:
-			stats.RequestCounter.WithLabelValues("no_connection").Add(1)
-			w.WriteHeader(http.StatusGatewayTimeout)
-			w.Write([]byte("Gateway Timeout"))
 			return
 		}
+
+		stats.CacheCounter.WithLabelValues("miss").Add(1)
+	}
+
+	usableProxy, err := conn.Get()
+	if err != nil {
+		log.Printf("retrying err with request: %s", err.Error())
+		p.Fetch(w, r)
+	} else {
+		usableProxy.ServeHTTP(w, r)
 	}
 }
 
@@ -224,7 +209,7 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 					} else {
 						proxy := httputil.NewSingleHostReverseProxy(endpoint)
 						proxy.Transport = p.client.Transport
-						proxy.ErrorHandler = errorHandler
+						proxy.ErrorHandler = p.errorHandler
 						p.setupCache(proxy)
 
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
@@ -283,7 +268,7 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 		log.Printf("error parsing backend url: %s", backend)
 	} else {
 		proxy := httputil.NewSingleHostReverseProxy(endpoint)
-		proxy.ErrorHandler = errorHandler
+		proxy.ErrorHandler = p.errorHandler
 		proxy.Transport = p.client.Transport
 		p.setupCache(proxy)
 
@@ -311,9 +296,9 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 	return connections
 }
 
-func errorHandler(w http.ResponseWriter, r *http.Request, e error) {
-	stats.RequestCounter.WithLabelValues("http_error").Add(1)
-	return
+func (p *pool) errorHandler(w http.ResponseWriter, r *http.Request, e error) {
+	stats.RequestCounter.WithLabelValues("backend_error").Add(1)
+	p.Fetch(w, r)
 }
 
 func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
