@@ -25,7 +25,7 @@ var (
 			Name: "cache",
 			Help: "cache hit and misses",
 		},
-		[]string{"cache"},
+		[]string{"path", "cache"},
 	)
 
 	RequestCounter = prometheus.NewCounterVec(
@@ -33,7 +33,7 @@ var (
 			Name: "request",
 			Help: "requests",
 		},
-		[]string{"status"},
+		[]string{"host", "status"},
 	)
 
 	HealthGauge = prometheus.NewGaugeVec(

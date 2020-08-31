@@ -3,6 +3,7 @@ package pool
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
@@ -29,7 +30,6 @@ type pool struct {
 	healthChecks    map[string]*healthcheck.HealthChecker
 	client          *http.Client
 	connsPerBackend int
-	cacheEnabled    bool
 	cache           *ristretto.Cache
 }
 
@@ -40,12 +40,8 @@ func New(c *Config) *pool {
 	connsPerBackend := c.NumConns
 	cacheEnabled := c.EnableCache
 
-	var maxRequests int
 	backendCount := int(math.Max(float64(len(backends)), float64(1)))
-
-	if backendCount > 0 {
-		maxRequests = connsPerBackend * backendCount * 2
-	}
+	maxRequests := connsPerBackend * backendCount * 2
 
 	tr := &http.Transport{
 		DialContext: (&net.Dialer{
@@ -62,11 +58,9 @@ func New(c *Config) *pool {
 		Transport: tr,
 	}
 
-	var cache *ristretto.Cache
-	var err error
-	if cache, err = buildCache(cacheEnabled); err != nil {
+	cache, err := buildCache(cacheEnabled)
+	if err != nil {
 		log.Printf("Error creating cache: %v", err)
-		cacheEnabled = false
 	}
 
 	connectionPool := &pool{
@@ -75,7 +69,6 @@ func New(c *Config) *pool {
 		client:          client,
 		connsPerBackend: connsPerBackend,
 		cache:           cache,
-		cacheEnabled:    cacheEnabled,
 	}
 
 	poolConnections := []*connection.Connection{}
@@ -138,7 +131,7 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	if p.cache != nil && r.Method == "GET" {
 		value, found := p.cache.Get(r.URL.Path)
 		if found {
-			stats.CacheCounter.WithLabelValues("hit").Add(1)
+			stats.CacheCounter.WithLabelValues(r.URL.Path, "hit").Add(1)
 			res := value.(string)
 			_, err := w.Write([]byte(res))
 			if err != nil {
@@ -147,7 +140,7 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		stats.CacheCounter.WithLabelValues("miss").Add(1)
+		stats.CacheCounter.WithLabelValues(r.URL.Path, "miss").Add(1)
 	}
 
 	usableProxy, err := conn.Get()
@@ -297,7 +290,8 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 }
 
 func (p *pool) errorHandler(w http.ResponseWriter, r *http.Request, e error) {
-	stats.RequestCounter.WithLabelValues("backend_error").Add(1)
+	host := fmt.Sprintf("%s:%s", r.URL.Hostname(), r.URL.Port())
+	stats.RequestCounter.WithLabelValues(host, "backend_error").Add(1)
 	p.Fetch(w, r)
 }
 

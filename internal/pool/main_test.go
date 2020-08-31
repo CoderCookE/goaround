@@ -38,12 +38,12 @@ func waitForHealthCheck(connectionPool *pool, server string) {
 func TestSetupCache(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
-	t.Run("It updates the ModifyResponse method", func(t *testing.T) {
+	t.Run("it updates the ModifyResponse method", func(t *testing.T) {
 		backends := []string{"http://www.foo.com"}
 		config := &Config{
 			Backends:    backends,
 			NumConns:    10,
-			EnableCache: false,
+			EnableCache: true,
 		}
 
 		endpoint, err := url.ParseRequestURI(backends[0])
@@ -51,13 +51,6 @@ func TestSetupCache(t *testing.T) {
 
 		connectionPool := New(config)
 		proxy := httputil.NewSingleHostReverseProxy(endpoint)
-
-		value, found := connectionPool.cache.Get("/foo")
-		assertion.Equal(found, false)
-		assertion.Equal(value, nil)
-
-		cache, _ := buildCache(true)
-		connectionPool.cache = cache
 		connectionPool.setupCache(proxy)
 
 		req, _ := http.NewRequest("GET", "http://example.com/foo", nil)
@@ -65,7 +58,7 @@ func TestSetupCache(t *testing.T) {
 		err = proxy.ModifyResponse(res)
 		assertion.Equal(err, nil)
 
-		value, found = connectionPool.cache.Get("/foo")
+		value, found := connectionPool.cache.Get("/foo")
 
 		breaker := !found
 		ticker := time.NewTicker(500 * time.Millisecond)

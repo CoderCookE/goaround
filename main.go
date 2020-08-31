@@ -30,6 +30,7 @@ func main() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		defer r.Body.Close()
+
 		connectionPool.Fetch(w, r)
 
 		duration := time.Since(start).Seconds()
