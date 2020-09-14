@@ -3,6 +3,8 @@ package pool
 import (
 	"bufio"
 	"bytes"
+	"context"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
@@ -29,8 +31,8 @@ type pool struct {
 	healthChecks    map[string]*healthcheck.HealthChecker
 	client          *http.Client
 	connsPerBackend int
-	cacheEnabled    bool
 	cache           *ristretto.Cache
+	retryWG         *sync.WaitGroup
 }
 
 //Exported method for creation of a connection-pool takes []string
@@ -40,12 +42,8 @@ func New(c *Config) *pool {
 	connsPerBackend := c.NumConns
 	cacheEnabled := c.EnableCache
 
-	var maxRequests int
 	backendCount := int(math.Max(float64(len(backends)), float64(1)))
-
-	if backendCount > 0 {
-		maxRequests = connsPerBackend * backendCount * 2
-	}
+	maxRequests := connsPerBackend * backendCount * 2
 
 	tr := &http.Transport{
 		DialContext: (&net.Dialer{
@@ -54,19 +52,17 @@ func New(c *Config) *pool {
 		}).DialContext,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 10 * time.Second,
-		ResponseHeaderTimeout: 60 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
 	}
 
 	client := &http.Client{
-		Timeout:   60 * time.Second,
+		Timeout:   30 * time.Second,
 		Transport: tr,
 	}
 
-	var cache *ristretto.Cache
-	var err error
-	if cache, err = buildCache(); err != nil {
+	cache, err := buildCache(cacheEnabled)
+	if err != nil {
 		log.Printf("Error creating cache: %v", err)
-		cacheEnabled = false
 	}
 
 	connectionPool := &pool{
@@ -75,7 +71,7 @@ func New(c *Config) *pool {
 		client:          client,
 		connsPerBackend: connsPerBackend,
 		cache:           cache,
-		cacheEnabled:    cacheEnabled,
+		retryWG:         &sync.WaitGroup{},
 	}
 
 	poolConnections := []*connection.Connection{}
@@ -105,7 +101,11 @@ func shuffle(conns []*connection.Connection, ch chan *connection.Connection) {
 	}
 }
 
-func buildCache() (*ristretto.Cache, error) {
+func buildCache(cacheEnabled bool) (*ristretto.Cache, error) {
+	if !cacheEnabled {
+		return nil, nil
+	}
+
 	cache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,     // number of keys to track frequency of (10M).
 		MaxCost:     1 << 30, // maximum cost of cache (1GB).
@@ -118,10 +118,27 @@ func buildCache() (*ristretto.Cache, error) {
 //Exported method for passing a request to a connection from the pool
 //Returns a 503 status code if request is unsuccessful
 func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	conn := <-p.connections
+
+	ctxAttempt := r.Context().Value("attempts")
+	var attempt int
+	if ctxAttempt != nil {
+		attempt = ctxAttempt.(int)
+	}
+	if attempt > 1 {
+		p.retryWG.Done()
+	}
+
+	duration := time.Since(start).Seconds()
+	stats.Durations.WithLabelValues("get_connection").Observe(duration)
 	stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
 	defer func() {
 		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
+		stats.Attempts.WithLabelValues().Observe(float64(attempt))
+		duration = time.Since(start).Seconds()
+		stats.Durations.WithLabelValues("return_connection").Observe(duration)
+
 		if !conn.Shut {
 			p.connections <- conn
 		}
@@ -130,7 +147,7 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	if p.cache != nil && r.Method == "GET" {
 		value, found := p.cache.Get(r.URL.Path)
 		if found {
-			stats.CacheCounter.WithLabelValues("hit").Add(1)
+			stats.CacheCounter.WithLabelValues(r.URL.Path, "hit").Add(1)
 			res := value.(string)
 			_, err := w.Write([]byte(res))
 			if err != nil {
@@ -139,7 +156,7 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		stats.CacheCounter.WithLabelValues("miss").Add(1)
+		stats.CacheCounter.WithLabelValues(r.URL.Path, "miss").Add(1)
 	}
 
 	usableProxy, err := conn.Get()
@@ -201,10 +218,9 @@ func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
 					} else {
 						proxy := httputil.NewSingleHostReverseProxy(endpoint)
 						proxy.Transport = p.client.Transport
+						proxy.ErrorHandler = p.errorHandler
+						p.setupCache(proxy)
 
-						if p.cacheEnabled {
-							p.setupCache(proxy)
-						}
 						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
 						p.healthChecks[new] = newHC
 					}
@@ -261,11 +277,9 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 		log.Printf("error parsing backend url: %s", backend)
 	} else {
 		proxy := httputil.NewSingleHostReverseProxy(endpoint)
+		proxy.ErrorHandler = p.errorHandler
 		proxy.Transport = p.client.Transport
-
-		if p.cacheEnabled {
-			p.setupCache(proxy)
-		}
+		p.setupCache(proxy)
 
 		backendConnections := make([]chan connection.Message, p.connsPerBackend)
 		for i := 0; i < p.connsPerBackend; i++ {
@@ -291,19 +305,33 @@ func (p *pool) addBackend(connections []*connection.Connection, backend string, 
 	return connections
 }
 
-func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
-	cacheResponse := func(r *http.Response) error {
-		body, err := ioutil.ReadAll(r.Body)
-		cacheable := string(body)
-		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+func (p *pool) errorHandler(w http.ResponseWriter, r *http.Request, e error) {
+	host := fmt.Sprintf("%s:%s", r.URL.Hostname(), r.URL.Port())
 
-		path := r.Request.URL.Path
-		if err == nil {
-			p.cache.Set(path, cacheable, 1)
+	stats.RequestCounter.WithLabelValues(host, "backend_error").Add(1)
+
+	attempts := r.Context().Value("attempts").(int) + 1
+	p.retryWG.Add(1)
+	ctx := context.WithValue(r.Context(), "attempts", attempts)
+
+	p.Fetch(w, r.WithContext(ctx))
+}
+
+func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
+	if p.cache != nil {
+		cacheResponse := func(r *http.Response) error {
+			body, err := ioutil.ReadAll(r.Body)
+			cacheable := string(body)
+			r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+			path := r.Request.URL.Path
+			if err == nil {
+				p.cache.Set(path, cacheable, 1)
+			}
+
+			return nil
 		}
 
-		return nil
+		proxy.ModifyResponse = cacheResponse
 	}
-
-	proxy.ModifyResponse = cacheResponse
 }

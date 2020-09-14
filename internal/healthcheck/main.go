@@ -43,7 +43,7 @@ func New(client *http.Client, subscribers []chan connection.Message, backend str
 
 func (hc *HealthChecker) Start(startup *sync.WaitGroup) {
 	bg := context.Background()
-	timeout := 1000 * time.Millisecond
+	timeout := 10000 * time.Millisecond
 	startup.Done()
 	ctx, cancel := context.WithTimeout(bg, timeout)
 	hc.check(ctx, cancel)
