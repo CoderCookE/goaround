@@ -66,9 +66,12 @@ func main() {
 }
 
 func parseConfig() {
-	configFile := flag.String("c", "", "Config File Location (optional) ")
+	configType := flag.String("--config-type", "local", "local or consul")
+	configLocation := flag.String("c", "", "Config File Location")
+	consulKey := flag.String("--consul-key", "", "Consul Key if using consul config type")
+
 	flag.Parse()
 
-	loadConfigFile(*configFile)
+	loadConfigFile(*configType, *configLocation, *consulKey)
 	return
 }
