@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/spf13/viper"
+	_ "github.com/spf13/viper/remote"
 )
 
 func loadConfigFile(configType, configLocation, consulKey string) {
