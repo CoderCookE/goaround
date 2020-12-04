@@ -8,22 +8,21 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/CoderCookE/goaround/internal/customflags"
+	"github.com/spf13/viper"
+
 	"github.com/CoderCookE/goaround/internal/gracefulserver"
 	"github.com/CoderCookE/goaround/internal/pool"
 	"github.com/CoderCookE/goaround/internal/stats"
 )
 
 func main() {
-	portString, metricPortString, backends, numConns, cacert, privkey, enableCache := parseFlags()
+	parseConfig()
 
 	config := &pool.Config{
-		Backends:    backends,
-		NumConns:    *numConns,
-		EnableCache: *enableCache,
+		Backends:    viper.GetStringSlice("backends.hosts"),
+		NumConns:    viper.GetInt("backends.numConns"),
+		EnableCache: viper.GetBool("cache.enabled"),
 	}
-
-	log.Printf("Starting with conf, %s %s %d", portString, backends, *numConns)
 
 	connectionPool := pool.New(config)
 	defer connectionPool.Shutdown()
@@ -39,10 +38,10 @@ func main() {
 		stats.Durations.WithLabelValues("handle").Observe(duration)
 	})
 
-	go stats.StartUp(metricPortString)
+	go stats.StartUp(fmt.Sprintf(":%d", viper.GetInt("metrics.port")))
 
 	server := &http.Server{
-		Addr:         portString,
+		Addr:         fmt.Sprintf(":%d", viper.GetInt("server.port")),
 		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -52,8 +51,11 @@ func main() {
 
 	graceful := gracefulserver.New(server)
 	var err error
-	if *cacert != "" && *privkey != "" {
-		err = graceful.ListenAndServeTLS(*cacert, *privkey)
+	cacert := viper.GetString("server.cacert")
+	privkey := viper.GetString("server.privkey")
+
+	if cacert != "" && privkey != "" {
+		err = graceful.ListenAndServeTLS(cacert, privkey)
 	} else {
 		err = graceful.ListenAndServe()
 	}
@@ -63,21 +65,10 @@ func main() {
 	}
 }
 
-func parseFlags() (portString, metricPortString string, backends customflags.Backend, numConns *int, cacert *string, privkey *string, enableCache *bool) {
-	port := flag.Int("p", 3000, "Load Balancer Listen Port (default: 3000)")
-	numConns = flag.Int("n", 3, "Max number of connections per backend")
-
-	backends = make(customflags.Backend, 0)
-	flag.Var(&backends, "b", "Backend location ex: http://localhost:9000")
-
-	cacert = flag.String("cacert", "", "cacert location")
-	privkey = flag.String("privkey", "", "privkey location")
-
-	metricPort := flag.Int("prometheus-port", 8080, "The address to listen on for HTTP requests.")
-	enableCache = flag.Bool("cache", false, "Enable request cache")
+func parseConfig() {
+	configFile := flag.String("c", "/etc/goaround", "Config File Location (optional) ")
 	flag.Parse()
-	portString = fmt.Sprintf(":%d", *port)
-	metricPortString = fmt.Sprintf(":%d", *metricPort)
 
+	loadConfigFile(*configFile)
 	return
 }

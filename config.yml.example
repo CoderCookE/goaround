@@ -1,0 +1,15 @@
+metrics:
+  port: 8080
+
+server:
+  port: 3001
+  cacert: ''
+  privkey: ''
+
+cache:
+  enabled: true
+  
+backends: 
+  hosts: []
+  numConns: 3
+  
