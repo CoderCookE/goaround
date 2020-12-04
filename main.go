@@ -66,7 +66,7 @@ func main() {
 }
 
 func parseConfig() {
-	configFile := flag.String("c", "/etc/goaround", "Config File Location (optional) ")
+	configFile := flag.String("c", "", "Config File Location (optional) ")
 	flag.Parse()
 
 	loadConfigFile(*configFile)

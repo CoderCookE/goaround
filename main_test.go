@@ -1,21 +1,26 @@
 package main
 
 import (
-	"github.com/CoderCookE/goaround/internal/assert"
+	"fmt"
 	"testing"
+
+	"github.com/spf13/viper"
+
+	"github.com/CoderCookE/goaround/internal/assert"
 )
 
 func TestParseFlags(t *testing.T) {
 	assertion := &assert.Asserter{T: t}
 
 	t.Run("Returns defaults", func(t *testing.T) {
-		portString, metricPortString, backends, numConns, cacert, privkey, cache := parseFlags()
-		assertion.Equal(":3000", portString)
-		assertion.Equal(":8080", metricPortString)
-		assertion.Equal(backends.String(), "[]")
-		assertion.Equal(*numConns, 3)
-		assertion.Equal(*cacert, "")
-		assertion.Equal(*privkey, "")
-		assertion.Equal(*cache, false)
+		parseConfig()
+
+		assertion.Equal(":3000", fmt.Sprintf(":%d", viper.GetInt("server.port")))
+		assertion.Equal(":8080", fmt.Sprintf(":%d", viper.GetInt("metrics.port")))
+		assertion.Equal(fmt.Sprintf("%v", make([]string, 0)), fmt.Sprintf("%v", viper.GetStringSlice("backends.hosts")))
+		assertion.Equal(3, viper.GetInt("backends.numConns"))
+		assertion.Equal("", viper.GetString("server.cacert"))
+		assertion.Equal("", viper.GetString("server.privkey"))
+		assertion.Equal(false, viper.GetBool("cache.enabled"))
 	})
 }
