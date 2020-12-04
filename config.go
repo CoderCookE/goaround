@@ -26,9 +26,6 @@ func loadConfigFile(configType, configLocation, consulKey string) {
 		}
 
 		viper.WatchRemoteConfig()
-		viper.OnConfigChange(func(e fsnotify.Event) {
-			fmt.Println("Config file changed:", e.Name)
-		})
 
 	case "local":
 		viper.SetConfigName("config")
@@ -40,10 +37,12 @@ func loadConfigFile(configType, configLocation, consulKey string) {
 		}
 
 		viper.WatchConfig()
-		viper.OnConfigChange(func(e fsnotify.Event) {
-			fmt.Println("Config file changed:", e.Name)
-		})
+
 	}
+
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		fmt.Println("Config file changed:", e.Name)
+	})
 }
 
 func setDefaults() {
