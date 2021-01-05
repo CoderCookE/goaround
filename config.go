@@ -16,18 +16,6 @@ func loadConfigFile(configType, configLocation, consulKey string) {
 	}
 
 	switch configType {
-	case "consul":
-		viper.AddRemoteProvider(configType, configLocation, consulKey)
-		viper.SetConfigType("json")
-		err := viper.ReadRemoteConfig()
-		if err != nil {
-			fmt.Errorf("Fatal error config file: %s \n, retrying", err)
-			time.Sleep(500)
-			loadConfigFile(configType, configLocation, consulKey)
-		}
-
-		viper.WatchRemoteConfig()
-
 	case "local":
 		viper.SetConfigName("config")
 		viper.AddConfigPath(configLocation)
