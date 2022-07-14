@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -12,12 +11,6 @@ import (
 	"github.com/CoderCookE/goaround/internal/gracefulserver"
 	"github.com/CoderCookE/goaround/internal/pool"
 	"github.com/CoderCookE/goaround/internal/stats"
-)
-
-type attempts int
-
-const (
-	attemptsKey attempts = iota
 )
 
 func main() {
@@ -37,9 +30,8 @@ func main() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		defer r.Body.Close()
-		ctx := context.WithValue(context.Background(), attemptsKey, 1)
 
-		connectionPool.Fetch(w, r.WithContext(ctx))
+		connectionPool.Fetch(w, r)
 
 		duration := time.Since(start).Seconds()
 		stats.Durations.WithLabelValues("handle").Observe(duration)

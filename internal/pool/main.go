@@ -38,7 +38,7 @@ type pool struct {
 	client          *http.Client
 	connsPerBackend int
 	cache           *ristretto.Cache
-	retryWG         *sync.WaitGroup
+	maxRetries      int
 }
 
 //Exported method for creation of a connection-pool takes []string
@@ -47,6 +47,7 @@ func New(c *Config) *pool {
 	backends := c.Backends
 	connsPerBackend := c.NumConns
 	cacheEnabled := c.EnableCache
+	maxRetries := c.MaxRetries
 
 	backendCount := int(math.Max(float64(len(backends)), float64(1)))
 	maxRequests := connsPerBackend * backendCount * 2
@@ -77,7 +78,7 @@ func New(c *Config) *pool {
 		client:          client,
 		connsPerBackend: connsPerBackend,
 		cache:           cache,
-		retryWG:         &sync.WaitGroup{},
+		maxRetries:      maxRetries,
 	}
 
 	poolConnections := []*connection.Connection{}
@@ -129,11 +130,13 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 
 	ctxAttempt := r.Context().Value(attemptsKey)
 	var attempt int
+
 	if ctxAttempt != nil {
-		attempt = ctxAttempt.(int)
+		attempt = ctxAttempt.(int) + 1
 	}
-	if attempt > 1 {
-		p.retryWG.Done()
+
+	if attempt > p.maxRetries {
+		return
 	}
 
 	duration := time.Since(start).Seconds()
@@ -166,9 +169,11 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	usableProxy, err := conn.Get()
+	ctx := context.WithValue(r.Context(), attemptsKey, attempt)
+
 	if err != nil {
 		log.Printf("retrying err with request: %s", err.Error())
-		p.Fetch(w, r)
+		p.Fetch(w, r.WithContext(ctx))
 	} else {
 		usableProxy.ServeHTTP(w, r)
 	}
@@ -316,11 +321,7 @@ func (p *pool) errorHandler(w http.ResponseWriter, r *http.Request, e error) {
 
 	stats.RequestCounter.WithLabelValues(host, "backend_error").Add(1)
 
-	attempts := r.Context().Value(attemptsKey).(int) + 1
-	p.retryWG.Add(1)
-	ctx := context.WithValue(r.Context(), attemptsKey, attempts)
-
-	p.Fetch(w, r.WithContext(ctx))
+	p.Fetch(w, r)
 }
 
 func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
