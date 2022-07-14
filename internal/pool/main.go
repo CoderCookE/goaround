@@ -25,6 +25,12 @@ import (
 	"github.com/CoderCookE/goaround/internal/stats"
 )
 
+type attempts int
+
+const (
+	attemptsKey attempts = iota
+)
+
 type pool struct {
 	sync.RWMutex
 	connections     chan *connection.Connection
@@ -121,7 +127,7 @@ func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	conn := <-p.connections
 
-	ctxAttempt := r.Context().Value("attempts")
+	ctxAttempt := r.Context().Value(attemptsKey)
 	var attempt int
 	if ctxAttempt != nil {
 		attempt = ctxAttempt.(int)
@@ -310,9 +316,9 @@ func (p *pool) errorHandler(w http.ResponseWriter, r *http.Request, e error) {
 
 	stats.RequestCounter.WithLabelValues(host, "backend_error").Add(1)
 
-	attempts := r.Context().Value("attempts").(int) + 1
+	attempts := r.Context().Value(attemptsKey).(int) + 1
 	p.retryWG.Add(1)
-	ctx := context.WithValue(r.Context(), "attempts", attempts)
+	ctx := context.WithValue(r.Context(), attemptsKey, attempts)
 
 	p.Fetch(w, r.WithContext(ctx))
 }

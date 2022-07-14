@@ -14,6 +14,12 @@ import (
 	"github.com/CoderCookE/goaround/internal/stats"
 )
 
+type attempts int
+
+const (
+	attemptsKey attempts = iota
+)
+
 func main() {
 	portString, metricPortString, backends, numConns, cacert, privkey, enableCache := parseFlags()
 
@@ -31,7 +37,7 @@ func main() {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		defer r.Body.Close()
-		ctx := context.WithValue(context.Background(), "attempts", 1)
+		ctx := context.WithValue(context.Background(), attemptsKey, 1)
 
 		connectionPool.Fetch(w, r.WithContext(ctx))
 
