@@ -3,17 +3,17 @@ package pool
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"fmt"
+	"hash/fnv"
+	"io"
 	"io/ioutil"
 	"log"
-	"math"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -31,80 +31,107 @@ const (
 	attemptsKey attempts = iota
 )
 
-type pool struct {
+type Pool struct {
 	sync.RWMutex
-	connections     chan *connection.Connection
-	healthChecks    map[string]*healthcheck.HealthChecker
 	client          *http.Client
 	connsPerBackend int
+	hashRing        *ConsistentHash
+	healthChecks    map[string]*healthcheck.HealthChecker
 	cache           *ristretto.Cache
 	maxRetries      int
 }
 
-//Exported method for creation of a connection-pool takes []string
-//ex: ['http://localhost:9000','http://localhost:9000']
-func New(c *Config) *pool {
+type ConsistentHash struct {
+	sync.RWMutex
+	keys    []uint32
+	hashMap map[uint32]*connection.Connection
+}
+
+// NewConsistentHash initializes a new ConsistentHash
+func NewConsistentHash() *ConsistentHash {
+	return &ConsistentHash{
+		hashMap: make(map[uint32]*connection.Connection),
+	}
+}
+
+// Add adds a new connection to the consistent hash
+func (ch *ConsistentHash) Add(conn *connection.Connection) {
+	ch.Lock()
+	defer ch.Unlock()
+	hash := hashURL(conn.Backend)
+
+	ch.keys = append(ch.keys, hash)
+	ch.hashMap[hash] = conn
+	sort.Slice(ch.keys, func(i, j int) bool {
+		return ch.keys[i] < ch.keys[j]
+	})
+}
+
+// Get retrieves the connection for a given URL using consistent hashing
+func (ch *ConsistentHash) Get(url string) *connection.Connection {
+	if len(ch.keys) == 0 {
+		return nil // No connections available
+	}
+
+	hash := hashURL(url)
+	ch.RLock()
+	defer ch.RUnlock()
+
+	// Find the appropriate node
+	idx := sort.Search(len(ch.keys), func(i int) bool {
+		return ch.keys[i] >= hash
+	})
+
+	if idx == len(ch.keys) {
+		// Wrap around to the first node
+		idx = 0
+	}
+
+	return ch.hashMap[ch.keys[idx]]
+}
+
+// New creates a new connection pool from the given configuration.
+func New(c *Config) *Pool {
 	backends := c.Backends
 	connsPerBackend := c.NumConns
 	cacheEnabled := c.EnableCache
 	maxRetries := c.MaxRetries
 
-	backendCount := int(math.Max(float64(len(backends)), float64(1)))
-	maxRequests := connsPerBackend * backendCount * 2
-
-	tr := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 10 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 10 * time.Second,
-		ResponseHeaderTimeout: 10 * time.Second,
-	}
-
-	client := &http.Client{
-		Timeout:   30 * time.Second,
-		Transport: tr,
-	}
-
+	client := createHTTPClient()
 	cache, err := buildCache(cacheEnabled)
 	if err != nil {
 		log.Printf("Error creating cache: %v", err)
 	}
 
-	connectionPool := &pool{
-		connections:     make(chan *connection.Connection, maxRequests),
-		healthChecks:    make(map[string]*healthcheck.HealthChecker),
+	connectionPool := &Pool{
 		client:          client,
 		connsPerBackend: connsPerBackend,
 		cache:           cache,
 		maxRetries:      maxRetries,
+		hashRing:        NewConsistentHash(),
+		healthChecks:    make(map[string]*healthcheck.HealthChecker),
 	}
-
-	poolConnections := []*connection.Connection{}
 
 	startup := &sync.WaitGroup{}
-	for _, backend := range backends {
-		startup.Add(1)
-		poolConnections = connectionPool.addBackend(poolConnections, backend, startup)
-	}
+	connectionPool.initializeBackends(backends, startup)
 
-	shuffle(poolConnections, connectionPool.connections)
-
-	go connectionPool.ListenForBackendChanges(startup)
+	go connectionPool.listenForBackendChanges(startup)
 
 	return connectionPool
 }
 
-func shuffle(conns []*connection.Connection, ch chan *connection.Connection) {
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(conns), func(i, j int) {
-		conns[i], conns[j] = conns[j], conns[i]
-	})
-
-	for _, conn := range conns {
-		stats.AvailableConnectionsGauge.WithLabelValues("available").Add(1)
-		ch <- conn
+func createHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   10 * time.Second,
+				KeepAlive: 10 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+		},
 	}
 }
 
@@ -113,158 +140,320 @@ func buildCache(cacheEnabled bool) (*ristretto.Cache, error) {
 		return nil, nil
 	}
 
-	cache, err := ristretto.NewCache(&ristretto.Config{
-		NumCounters: 1e7,     // number of keys to track frequency of (10M).
-		MaxCost:     1 << 30, // maximum cost of cache (1GB).
-		BufferItems: 64,      // number of keys per Get buffer.
+	return ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,     // 10M keys to track frequency.
+		MaxCost:     1 << 30, // 1GB maximum cost.
+		BufferItems: 64,      // 64 keys per Get buffer.
 	})
-
-	return cache, err
 }
 
-//Exported method for passing a request to a connection from the pool
-//Returns a 503 status code if request is unsuccessful
-func (p *pool) Fetch(w http.ResponseWriter, r *http.Request) {
-	start := time.Now()
-	conn := <-p.connections
+func (cp *Pool) initializeBackends(backends []string, startup *sync.WaitGroup) {
+	for _, backend := range backends {
+		startup.Add(1)
+		cp.addBackend(backend, startup)
+	}
+}
 
-	ctxAttempt := r.Context().Value(attemptsKey)
-	var attempt int
+func hashURL(url string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(url))
+	return h.Sum32()
+}
 
-	if ctxAttempt != nil {
-		attempt = ctxAttempt.(int) + 1
+func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
+	attempt := getAttemptCount(r)
+	log.Printf("Attempt: %d", attempt)
+
+	// Extract the URL from query params
+	requestURL := r.URL.Query().Get("url")
+
+	if requestURL == "" {
+		// If the `url` is not set, fallback to the request URL
+		requestURL = r.URL.String()
 	}
 
-	if attempt > p.maxRetries {
+	log.Printf("Requesting: %s", requestURL)
+
+	parsedURL, err := url.Parse(requestURL)
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		log.Printf("Invalid %s", requestURL)
+		http.Error(w, "Invalid URL", http.StatusBadRequest)
 		return
 	}
 
+	// If this is the first attempt and cache is available, check the cache
+	if attempt == 0 && p.cache != nil {
+		cachedResponse := p.getCachedResponse(requestURL)
+		if cachedResponse != "" {
+			log.Printf("Cache hit for URL: %s", requestURL)
+			w.Write([]byte(cachedResponse))
+			return
+		}
+	}
+
+	var backendURL string
+
+	// If the attempt is 0, use the hashing mechanism to select a backend
+
+	var proxy *httputil.ReverseProxy
+
+	if attempt == 0 {
+		conn := p.hashRing.Get(requestURL)
+		if conn == nil {
+			http.Error(w, "No backend found", http.StatusInternalServerError)
+			return
+		}
+
+		backendURL = conn.Backend
+		log.Printf("Selected backend: %s for URL: %s", backendURL, requestURL)
+
+		var err error
+		proxy, err = conn.Get() // Assuming Get() returns the proxy
+		if err != nil || proxy == nil {
+			log.Printf("Error retrieving proxy: %v", err)
+			http.Error(w, "Failed to get proxy", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// If attempts > 0, proxy directly to the URL
+		backendURL = requestURL
+		log.Printf("Retrying final request directly to: %s", backendURL)
+		// Parse backend URL
+		parsedBackendURL, err := url.Parse(backendURL)
+		if err != nil || parsedBackendURL == nil {
+			http.Error(w, "Invalid backend URL", http.StatusInternalServerError)
+			return
+		}
+
+		// 		// **Copy query params from the original requestURL**
+		// 		originalQueryParams := parsedURL.Query()
+		// 		backendQueryParams := parsedBackendURL.Query()
+
+		// 		// Merge the original query params into the backend query params
+		// 		for key, values := range originalQueryParams {
+		// 			for _, value := range values {
+		// 				backendQueryParams.Add(key, value)
+		// 			}
+		// 		}
+		// 		parsedBackendURL.RawQuery = backendQueryParams.Encode()
+
+		// 		log.Printf("Final backend URL: %s", parsedBackendURL.String())
+		// 		r.URL.Scheme = parsedBackendURL.Scheme
+		// 		r.URL.Host = parsedBackendURL.Host
+		// 		r.Host = parsedBackendURL.Host
+		// 		r.URL.Path = parsedURL.Path                // Use the original path of the requested URL
+		// 		r.URL.RawQuery = parsedBackendURL.RawQuery // Attach the merged query params
+
+		// 		log.Printf("Sending request to: %s", r.URL.String())
+
+		proxy = httputil.NewSingleHostReverseProxy(parsedBackendURL)
+		proxy.ErrorHandler = p.errorHandler
+		proxy.Transport = p.client.Transport
+		p.setupCache(proxy)
+	}
+
+	// Set attempt count in the header
+	r.Header.Set("X-Attempt-Count", fmt.Sprintf("%d", attempt))
+
+	// Serve the request using the proxy
+	proxy.ServeHTTP(w, r)
+}
+
+func (p *Pool) serveRequest(w http.ResponseWriter, r *http.Request, conn *connection.Connection) error {
+	usableProxy, err := conn.Get()
+	if err != nil {
+		return err
+	}
+
+	usableProxy.ServeHTTP(w, r)
+	return nil
+}
+
+func getAttemptCount(r *http.Request) int {
+	if attemptHeader := r.Header.Get("X-Attempt-Count"); attemptHeader != "" {
+		var attempt int
+		fmt.Sscanf(attemptHeader, "%d", &attempt)
+		return attempt + 1
+	}
+
+	return 0
+}
+
+func (p *Pool) makeRequest(w http.ResponseWriter, backendURL string, originalRequest *http.Request) error {
+	// Create a new request with the same method, URL, and body
+	req, err := http.NewRequest(originalRequest.Method, backendURL, originalRequest.Body)
+	if err != nil {
+		return fmt.Errorf("failed to create new request: %w", err)
+	}
+
+	// Copy query parameters
+	req.URL.RawQuery = originalRequest.URL.RawQuery
+
+	// Copy headers from the original request
+	for key, values := range originalRequest.Header {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+
+	// Initialize an HTTP client with a timeout
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	fmt.Printf("Making request to %s\n", req.URL.String())
+
+	// Send the request
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Copy the response headers
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	// Write the response status code
+	w.WriteHeader(resp.StatusCode)
+
+	// Copy the response body to the ResponseWriter
+	if _, err = io.Copy(w, resp.Body); err != nil {
+		return fmt.Errorf("failed to copy response body: %w", err)
+	}
+
+	return nil
+}
+
+func (p *Pool) recordFetchMetrics(start time.Time, conn *connection.Connection, attempt int) {
 	duration := time.Since(start).Seconds()
 	stats.Durations.WithLabelValues("get_connection").Observe(duration)
 	stats.AvailableConnectionsGauge.WithLabelValues("in_use").Add(1)
+
 	defer func() {
 		stats.AvailableConnectionsGauge.WithLabelValues("in_use").Sub(1)
 		stats.Attempts.WithLabelValues().Observe(float64(attempt))
 		duration = time.Since(start).Seconds()
 		stats.Durations.WithLabelValues("return_connection").Observe(duration)
-
-		if !conn.Shut {
-			p.connections <- conn
-		}
 	}()
-
-	if p.cache != nil && r.Method == "GET" {
-		value, found := p.cache.Get(r.URL.Path)
-		if found {
-			stats.CacheCounter.WithLabelValues(r.URL.Path, "hit").Add(1)
-			res := value.(string)
-			_, err := w.Write([]byte(res))
-			if err != nil {
-				log.Printf("Error writing: %s", err.Error())
-			}
-			return
-		}
-
-		stats.CacheCounter.WithLabelValues(r.URL.Path, "miss").Add(1)
-	}
-
-	usableProxy, err := conn.Get()
-	ctx := context.WithValue(r.Context(), attemptsKey, attempt)
-
-	if err != nil {
-		log.Printf("retrying err with request: %s", err.Error())
-		p.Fetch(w, r.WithContext(ctx))
-	} else {
-		usableProxy.ServeHTTP(w, r)
-	}
 }
 
-func (p *pool) Shutdown() {
+func (p *Pool) getCachedResponse(path string) string {
+	if value, found := p.cache.Get(path); found {
+		log.Printf("Cache Hit: %s", path)
+		stats.CacheCounter.WithLabelValues(path, "hit").Add(1)
+		return value.(string)
+	}
+
+	stats.CacheCounter.WithLabelValues(path, "miss").Add(1)
+	log.Printf("Cache Miss: %s", path)
+	return ""
+}
+
+func (p *Pool) Shutdown() {
 	p.RLock()
+	defer p.RUnlock()
+
 	for _, hc := range p.healthChecks {
 		hc.Shutdown()
 	}
-	p.RUnlock()
 }
 
-func (p *pool) ListenForBackendChanges(startup *sync.WaitGroup) {
-	const SockAddr = "/tmp/goaround.sock"
+func (p *Pool) listenForBackendChanges(startup *sync.WaitGroup) {
+	const sockAddr = "/tmp/goaround.sock"
 
-	if err := os.RemoveAll(SockAddr); err != nil {
+	if err := os.RemoveAll(sockAddr); err != nil {
 		log.Fatal(err)
 	}
 
-	l, err := net.Listen("unix", SockAddr)
+	listener, err := net.Listen("unix", sockAddr)
 	if err != nil {
-		log.Fatal("listen error:", err)
+		log.Fatal("Listen error:", err)
 	}
-	defer l.Close()
+	defer listener.Close()
 
 	for {
-		conn, err := l.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
-			log.Fatal("accept error:", err)
+			log.Fatal("Accept error:", err)
 		}
 
-		scanner := bufio.NewScanner(conn)
-		for scanner.Scan() {
-			updated := strings.Split(scanner.Text(), ",")
-			p.Lock()
-			var currentBackends []string
-			for k := range p.healthChecks {
-				currentBackends = append(currentBackends, k)
-			}
+		go p.handleBackendUpdates(conn, startup)
+	}
+}
 
-			added, removed := difference(currentBackends, updated)
-			log.Printf("Adding: %s", added)
-			log.Printf("Removing: %s", removed)
+func (p *Pool) handleBackendUpdates(conn net.Conn, startup *sync.WaitGroup) {
+	defer conn.Close()
 
-			for _, removedBackend := range removed {
-				if len(added) > 0 {
-					var new string
-					new, added = added[0], added[1:]
-					endpoint, err := url.ParseRequestURI(new)
-					if err != nil {
-						log.Printf("Error adding backend, %s", new)
-					} else {
-						proxy := httputil.NewSingleHostReverseProxy(endpoint)
-						proxy.Transport = p.client.Transport
-						proxy.ErrorHandler = p.errorHandler
-						p.setupCache(proxy)
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		updated := strings.Split(scanner.Text(), ",")
+		p.Lock()
+		p.updateBackends(updated)
+		p.Unlock()
+	}
+}
 
-						newHC := p.healthChecks[removedBackend].Reuse(new, proxy)
-						p.healthChecks[new] = newHC
-					}
-				} else {
-					p.healthChecks[removedBackend].Shutdown()
-				}
+func (p *Pool) updateBackends(updated []string) {
+	currentBackends := getCurrentBackends(p.healthChecks)
 
-				delete(p.healthChecks, removedBackend)
-			}
+	added, removed := difference(currentBackends, updated)
+	log.Printf("Adding: %v", added)
+	log.Printf("Removing: %v", removed)
 
-			poolConnections := []*connection.Connection{}
+	p.removeBackends(removed)
+	p.addBackends(added)
+}
 
-			wg := &sync.WaitGroup{}
-			for _, addedBackend := range added {
-				wg.Add(1)
-				poolConnections = p.addBackend(poolConnections, addedBackend, wg)
-			}
+func getCurrentBackends(healthChecks map[string]*healthcheck.HealthChecker) []string {
+	var current []string
+	for k := range healthChecks {
+		current = append(current, k)
+	}
+	return current
+}
 
-			shuffle(poolConnections, p.connections)
-			p.Unlock()
+func (p *Pool) removeBackends(removed []string) {
+	for _, backend := range removed {
+		if healthChecker, exists := p.healthChecks[backend]; exists {
+			healthChecker.Shutdown()
+			delete(p.healthChecks, backend)
 		}
 	}
 }
 
-func difference(original []string, updated []string) (added []string, removed []string) {
-	oldBackends := make(map[string]bool)
-	for _, i := range original {
-		oldBackends[i] = true
+func (p *Pool) addBackends(added []string) {
+	for _, backend := range added {
+		p.addBackend(backend, nil)
+	}
+}
+
+func (p *Pool) addBackend(backend string, startup *sync.WaitGroup) {
+	endpoint, err := url.ParseRequestURI(backend)
+	if err != nil {
+		log.Printf("Error parsing backend URL: %s", backend)
+		return
 	}
 
-	newBackends := make(map[string]bool)
+	proxy := httputil.NewSingleHostReverseProxy(endpoint)
+	proxy.ErrorHandler = p.errorHandler
+	proxy.Transport = p.client.Transport
+	p.setupCache(proxy)
+
+	conn := connection.NewConnection(proxy, backend, startup)
+	p.hashRing.Add(conn)
+}
+
+func difference(original, updated []string) (added, removed []string) {
+	oldBackends := make(map[string]struct{}, len(original))
+	for _, i := range original {
+		oldBackends[i] = struct{}{}
+	}
+
+	newBackends := make(map[string]struct{}, len(updated))
 	for _, i := range updated {
-		newBackends[i] = true
+		newBackends[i] = struct{}{}
 	}
 
 	for _, i := range updated {
@@ -282,63 +471,29 @@ func difference(original []string, updated []string) (added []string, removed []
 	return
 }
 
-func (p *pool) addBackend(connections []*connection.Connection, backend string, startup *sync.WaitGroup) []*connection.Connection {
-	endpoint, err := url.ParseRequestURI(backend)
-	if err != nil {
-		log.Printf("error parsing backend url: %s", backend)
-	} else {
-		proxy := httputil.NewSingleHostReverseProxy(endpoint)
-		proxy.ErrorHandler = p.errorHandler
-		proxy.Transport = p.client.Transport
-		p.setupCache(proxy)
-
-		backendConnections := make([]chan connection.Message, p.connsPerBackend)
-		for i := 0; i < p.connsPerBackend; i++ {
-			startup.Add(1)
-			configuredConn := connection.NewConnection(proxy, backend, startup)
-			connections = append(connections, configuredConn)
-			backendConnections[i] = configuredConn.Messages
-		}
-
-		hc := healthcheck.New(
-			p.client,
-			backendConnections,
-			backend,
-			false,
-		)
-
-		p.healthChecks[backend] = hc
-
-		go hc.Start(startup)
-	}
-
-	startup.Wait()
-	return connections
-}
-
-func (p *pool) errorHandler(w http.ResponseWriter, r *http.Request, e error) {
+func (p *Pool) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	host := fmt.Sprintf("%s:%s", r.URL.Hostname(), r.URL.Port())
-
 	stats.RequestCounter.WithLabelValues(host, "backend_error").Add(1)
-
 	p.Fetch(w, r)
 }
 
-func (p *pool) setupCache(proxy *httputil.ReverseProxy) {
+func (p *Pool) setupCache(proxy *httputil.ReverseProxy) {
 	if p.cache != nil {
-		cacheResponse := func(r *http.Response) error {
+		proxy.ModifyResponse = func(r *http.Response) error {
 			body, err := ioutil.ReadAll(r.Body)
-			cacheable := string(body)
+			if err != nil {
+				return err
+			}
 			r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 
-			path := r.Request.URL.Path
+			cacheable := string(body) // Convert the body to a string
+			print(cacheable)
+
 			if err == nil {
-				p.cache.Set(path, cacheable, 1)
+				p.cache.Set(r.Request.URL.String(), cacheable, 1)
 			}
 
 			return nil
 		}
-
-		proxy.ModifyResponse = cacheResponse
 	}
 }

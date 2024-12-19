@@ -106,6 +106,7 @@ func (hc *HealthChecker) check(ctx context.Context, cancel context.CancelFunc) {
 		}
 	}
 
+	healthy = true
 	if healthy != hc.currentHealth {
 		go updateStates(healthy)
 		hc.currentHealth = healthy
