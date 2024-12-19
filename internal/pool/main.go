@@ -25,12 +25,6 @@ import (
 	"github.com/CoderCookE/goaround/internal/stats"
 )
 
-type attempts int
-
-const (
-	attemptsKey attempts = iota
-)
-
 type Pool struct {
 	sync.RWMutex
 	client          *http.Client
@@ -183,9 +177,6 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var backendURL string
-
-	// If the attempt is 0, use the hashing mechanism to select a backend
-
 	var proxy *httputil.ReverseProxy
 
 	if attempt == 0 {
@@ -206,7 +197,6 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		// If attempts > 0, proxy directly to the URL
 		backendURL = requestURL
 		log.Printf("Retrying final request directly to: %s", backendURL)
 		// Parse backend URL
@@ -237,7 +227,6 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	// Set attempt count in the header
 	r.Header.Set("X-Attempt-Count", fmt.Sprintf("%d", attempt))
 
-	// Serve the request using the proxy
 	proxy.ServeHTTP(w, r)
 }
 
@@ -255,7 +244,7 @@ func getAttemptCount(r *http.Request) int {
 	if attemptHeader := r.Header.Get("X-Attempt-Count"); attemptHeader != "" {
 		var attempt int
 		fmt.Sscanf(attemptHeader, "%d", &attempt)
-		return attempt + 1
+		return 1
 	}
 
 	return 0
@@ -468,10 +457,15 @@ func (p *Pool) setupCache(proxy *httputil.ReverseProxy) {
 		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
 
 		cacheable := string(body) // Convert the body to a string
+		requestURL := r.Request.URL.Query().Get("url")
+
+		if requestURL == "" {
+			requestURL = r.Request.URL.String()
+		}
 
 		if err == nil {
-			print("adding: ", r.Request.URL.String())
-			p.cache.Set(r.Request.URL.String(), cacheable, 1)
+			print("adding: ", requestURL)
+			p.cache.Set(requestURL, cacheable, 1)
 		}
 
 		return nil
