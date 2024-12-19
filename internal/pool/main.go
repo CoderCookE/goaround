@@ -161,6 +161,8 @@ func hashURL(url string) uint32 {
 }
 
 func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
+	lookupURL := r.URL.Query().Get("url")
+
 	attempt := getAttemptCount(r)
 	log.Printf("Attempt: %d", attempt)
 
@@ -168,7 +170,6 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 	requestURL := r.URL.Query().Get("url")
 
 	if requestURL == "" {
-		// If the `url` is not set, fallback to the request URL
 		requestURL = r.URL.String()
 	}
 
@@ -179,16 +180,6 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Invalid %s", requestURL)
 		http.Error(w, "Invalid URL", http.StatusBadRequest)
 		return
-	}
-
-	// If this is the first attempt and cache is available, check the cache
-	if attempt == 0 && p.cache != nil {
-		cachedResponse := p.getCachedResponse(requestURL)
-		if cachedResponse != "" {
-			log.Printf("Cache hit for URL: %s", requestURL)
-			w.Write([]byte(cachedResponse))
-			return
-		}
 	}
 
 	var backendURL string
@@ -225,26 +216,9 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 		// **Copy query params from the original requestURL**
-		// 		originalQueryParams := parsedURL.Query()
-		// 		backendQueryParams := parsedBackendURL.Query()
-
-		// 		// Merge the original query params into the backend query params
-		// 		for key, values := range originalQueryParams {
-		// 			for _, value := range values {
-		// 				backendQueryParams.Add(key, value)
-		// 			}
-		// 		}
-		// 		parsedBackendURL.RawQuery = backendQueryParams.Encode()
-
-		// 		log.Printf("Final backend URL: %s", parsedBackendURL.String())
-		// 		r.URL.Scheme = parsedBackendURL.Scheme
-		// 		r.URL.Host = parsedBackendURL.Host
-		// 		r.Host = parsedBackendURL.Host
-		// 		r.URL.Path = parsedURL.Path                // Use the original path of the requested URL
-		// 		r.URL.RawQuery = parsedBackendURL.RawQuery // Attach the merged query params
-
-		// 		log.Printf("Sending request to: %s", r.URL.String())
+		query := r.URL.Query()
+		query.Del("url")
+		r.URL.RawQuery = query.Encode()
 
 		proxy = httputil.NewSingleHostReverseProxy(parsedBackendURL)
 		proxy.ErrorHandler = p.errorHandler
@@ -252,6 +226,14 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 		p.setupCache(proxy)
 	}
 
+	print("checking cache: ", lookupURL)
+
+	cachedResponse := p.getCachedResponse(lookupURL)
+	if cachedResponse != "" {
+		log.Printf("Cache hit for URL: %s", lookupURL)
+		w.Write([]byte(cachedResponse))
+		return
+	}
 	// Set attempt count in the header
 	r.Header.Set("X-Attempt-Count", fmt.Sprintf("%d", attempt))
 
@@ -478,22 +460,20 @@ func (p *Pool) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func (p *Pool) setupCache(proxy *httputil.ReverseProxy) {
-	if p.cache != nil {
-		proxy.ModifyResponse = func(r *http.Response) error {
-			body, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				return err
-			}
-			r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
-
-			cacheable := string(body) // Convert the body to a string
-			print(cacheable)
-
-			if err == nil {
-				p.cache.Set(r.Request.URL.String(), cacheable, 1)
-			}
-
-			return nil
+	proxy.ModifyResponse = func(r *http.Response) error {
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return err
 		}
+		r.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+
+		cacheable := string(body) // Convert the body to a string
+
+		if err == nil {
+			print("adding: ", r.Request.URL.String())
+			p.cache.Set(r.Request.URL.String(), cacheable, 1)
+		}
+
+		return nil
 	}
 }
