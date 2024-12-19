@@ -15,7 +15,7 @@ import (
 	"github.com/CoderCookE/goaround/internal/stats"
 )
 
-type Reponse struct {
+type Response struct {
 	State   string `json:"state"`
 	Message string `json:"message"`
 }
@@ -87,27 +87,28 @@ func (hc *HealthChecker) check(ctx context.Context, cancel context.CancelFunc) {
 		log.Printf("Error with health check, backend: %s, error %s", hc.backend, err.Error())
 		healthy = false
 	} else {
-		body, err := ioutil.ReadAll(resp.Body)
-		defer resp.Body.Close()
+		defer resp.Body.Close() // Move this to immediately after the request
 
+		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
-			log.Printf("Error with health check, backend: %s, error %s", hc.backend, err.Error())
+			log.Printf("Error reading response body, backend: %s, error %s", hc.backend, err.Error())
 			healthy = false
 		} else {
-			healthCheck := &Reponse{}
+			healthCheck := &Response{} // Corrected struct name
 			err := json.Unmarshal(body, healthCheck)
 
 			if err != nil {
 				log.Printf("Error reading backend response, defaulting to Status Code, backend: %s, error %s", hc.backend, err.Error())
-				healthy = resp.StatusCode == 200
+
+				healthy = resp.StatusCode == http.StatusOK // Use http.StatusOK constant
 			} else {
-				healthy = healthCheck.State == "healthy" || (resp.StatusCode == 200 && healthCheck.State != "degraded")
+				healthy = healthCheck.State == "healthy" || (resp.StatusCode == http.StatusOK && healthCheck.State != "degraded")
 			}
 		}
 	}
 
-	healthy = true
 	if healthy != hc.currentHealth {
+		log.Printf("Health Status Changed %s from %v to %v ", hc.backend, hc.currentHealth, healthy)
 		go updateStates(healthy)
 		hc.currentHealth = healthy
 		hc.notifySubscribers(healthy, hc.backend, nil)

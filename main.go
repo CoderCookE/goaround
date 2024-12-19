@@ -27,6 +27,13 @@ func main() {
 	connectionPool := pool.New(config)
 	defer connectionPool.Shutdown()
 
+	// Health check handler
+	healthHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	// Main request handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		defer r.Body.Close()
@@ -37,11 +44,16 @@ func main() {
 		stats.Durations.WithLabelValues("handle").Observe(duration)
 	})
 
+	// Combine health check and main handler
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", healthHandler)
+	mux.Handle("/", handler)
+
 	go stats.StartUp(metricPortString)
 
 	server := &http.Server{
 		Addr:         portString,
-		Handler:      handler,
+		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

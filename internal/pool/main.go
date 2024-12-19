@@ -176,31 +176,23 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var backendURL string
 	var proxy *httputil.ReverseProxy
 
-	if attempt == 0 {
-		conn := p.hashRing.Get(requestURL)
-		if conn == nil {
-			http.Error(w, "No backend found", http.StatusInternalServerError)
-			return
-		}
+	conn := p.hashRing.Get(requestURL)
+	if conn == nil {
+		http.Error(w, "No backend found", http.StatusInternalServerError)
+		return
+	}
 
-		backendURL = conn.Backend
-		log.Printf("Selected backend: %s for URL: %s", backendURL, requestURL)
-
-		var err error
-		proxy, err = conn.Get() // Assuming Get() returns the proxy
-		if err != nil || proxy == nil {
-			log.Printf("Error retrieving proxy: %v", err)
-			http.Error(w, "Failed to get proxy", http.StatusInternalServerError)
-			return
-		}
-	} else {
-		backendURL = requestURL
-		log.Printf("Retrying final request directly to: %s", backendURL)
+	proxy, err = conn.Get() // Assuming Get() returns the proxy
+	if err != nil {
+		log.Printf("Connection Unhealthy: %s", conn.Backend)
+	}
+	if attempt == 1 || err != nil {
+		lookupURL = requestURL
+		log.Printf("Retrying final request directly to: %s", requestURL)
 		// Parse backend URL
-		parsedBackendURL, err := url.Parse(backendURL)
+		parsedBackendURL, err := url.Parse(requestURL)
 		if err != nil || parsedBackendURL == nil {
 			http.Error(w, "Invalid backend URL", http.StatusInternalServerError)
 			return
@@ -214,11 +206,12 @@ func (p *Pool) Fetch(w http.ResponseWriter, r *http.Request) {
 		proxy.ErrorHandler = p.errorHandler
 		proxy.Transport = p.client.Transport
 		p.setupCache(proxy)
+	} else {
+		log.Printf("Selected backend: %s for URL: %s", conn.Backend, requestURL)
 	}
 
-	print("checking cache: ", lookupURL)
-
 	cachedResponse := p.getCachedResponse(lookupURL)
+
 	if cachedResponse != "" {
 		log.Printf("Cache hit for URL: %s", lookupURL)
 		w.Write([]byte(cachedResponse))
@@ -403,17 +396,32 @@ func (p *Pool) addBackends(added []string) {
 func (p *Pool) addBackend(backend string, startup *sync.WaitGroup) {
 	endpoint, err := url.ParseRequestURI(backend)
 	if err != nil {
-		log.Printf("Error parsing backend URL: %s", backend)
-		return
+		log.Printf("error parsing backend url: %s", backend)
+	} else {
+		proxy := httputil.NewSingleHostReverseProxy(endpoint)
+		proxy.ErrorHandler = p.errorHandler
+		proxy.Transport = p.client.Transport
+		p.setupCache(proxy)
+
+		backendConnections := make([]chan connection.Message, 1)
+		configuredConn := connection.NewConnection(proxy, backend, startup)
+		backendConnections[0] = configuredConn.Messages
+
+		hc := healthcheck.New(
+			p.client,
+			backendConnections,
+			backend,
+			false,
+		)
+
+		p.healthChecks[backend] = hc
+		startup.Add(1)
+		go hc.Start(startup)
+
+		p.hashRing.Add(configuredConn)
 	}
 
-	proxy := httputil.NewSingleHostReverseProxy(endpoint)
-	proxy.ErrorHandler = p.errorHandler
-	proxy.Transport = p.client.Transport
-	p.setupCache(proxy)
-
-	conn := connection.NewConnection(proxy, backend, startup)
-	p.hashRing.Add(conn)
+	startup.Wait()
 }
 
 func difference(original, updated []string) (added, removed []string) {

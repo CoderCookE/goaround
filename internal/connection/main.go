@@ -1,6 +1,7 @@
 package connection
 
 import (
+	"errors"
 	"net/http/httputil"
 	"sync"
 
@@ -38,7 +39,15 @@ func NewConnection(proxy *httputil.ReverseProxy, backend string, startup *sync.W
 }
 
 func (c *Connection) Get() (*httputil.ReverseProxy, error) {
-	return c.proxy, nil
+	c.Lock()
+	defer c.Unlock()
+
+	health := c.healthy
+	if health && !c.Shut {
+		return c.proxy, nil
+	}
+
+	return nil, errors.New("Unhealthy Node")
 }
 
 func (c *Connection) healthCheck() {
